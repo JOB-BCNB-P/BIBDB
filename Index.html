@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ระบบจอง Body Interact – วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ</title>
+  <meta name="description" content="ระบบกำกับติดตามการจองเข้าใช้งานโปรแกรม Body Interact สำหรับการเรียนการสอน" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ====== หน้าล็อกอิน ====== -->
+  <div id="loginView" class="login-wrap">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7H16l-1.7-2.5L11.6 14 9.8 10.6l-1 1.5H6.3" fill="#fff" fill-opacity=".22" stroke="none"/>
+            <path d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7"/>
+            <path d="M6.3 12.1h3l1-1.5 1.8 3.4 2.7-5.6L16.3 11h4.5" stroke-width="1.7"/>
+          </svg>
+        </div>
+        <h1>ระบบจอง Body Interact</h1>
+        <div class="sub">วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ</div>
+        <svg class="pulse-line" viewBox="0 0 320 26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="none">
+          <path d="M0 13 H90 l10 -9 l9 18 l11 -22 l10 27 l9 -14 H210 l8 -6 l7 10 H320"/>
+        </svg>
+      </div>
+
+      <div class="seg" role="tablist">
+        <button id="segStudent" class="active" onclick="App.switchLoginTab('student')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5 12 5l9.5 4.5L12 14z" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/></svg>
+          นักศึกษา
+        </button>
+        <button id="segTeacher" onclick="App.switchLoginTab('teacher')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.6" r="4" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="8.6" r="4"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/></svg>
+          อาจารย์
+        </button>
+        <button id="segAdmin" onclick="App.switchLoginTab('admin')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z"/><path d="M9.2 12l2 2 3.6-3.8"/></svg>
+          ผู้ดูแล
+        </button>
+      </div>
+
+      <!-- ฟอร์มนักศึกษา: เลขบัตรประชาชน 13 หลัก -->
+      <form id="studentForm" onsubmit="App.loginStudent(event)">
+        <div class="field">
+          <label for="sCid">เลขบัตรประชาชน (13 หลัก)</label>
+          <input class="input" id="sCid" inputmode="numeric" pattern="[0-9]*" maxlength="13" placeholder="เช่น 1100701234567" autocomplete="off" required />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
+        <div class="login-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="12" r="9"/><path d="M12 11.2v4.6"/><circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none"/></svg>
+          นักศึกษาเข้าระบบด้วยเลขบัตรประชาชน 13 หลักที่ลงทะเบียนไว้
+        </div>
+      </form>
+
+      <!-- ฟอร์มอาจารย์: อีเมล + รหัสผ่าน -->
+      <form id="teacherForm" class="hidden" onsubmit="App.loginTeacher(event)">
+        <div class="field">
+          <label for="tEmail">อีเมลอาจารย์</label>
+          <input class="input" id="tEmail" type="email" placeholder="name@bcnbangkok.ac.th" autocomplete="off" required />
+        </div>
+        <div class="field">
+          <label for="tPass">รหัสผ่าน</label>
+          <input class="input" id="tPass" type="password" placeholder="รหัสผ่าน" autocomplete="off" required />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
+      </form>
+
+      <!-- ฟอร์มผู้ดูแลระบบ: รหัสผ่าน -->
+      <form id="adminForm" class="hidden" onsubmit="App.loginAdmin(event)">
+        <div class="field">
+          <label for="aPass">รหัสผ่านผู้ดูแลระบบ</label>
+          <input class="input" id="aPass" type="password" placeholder="รหัสผ่านผู้ดูแล" autocomplete="off" required />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
+        <div class="login-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="12" r="9"/><path d="M12 11.2v4.6"/><circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none"/></svg>
+          ผู้ดูแลระบบมีสิทธิ์แก้ไขข้อมูลได้ทุกส่วน รวมถึงการตั้งค่าระบบ
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====== แอปหลัก ====== -->
+  <div id="appView" class="app hidden">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7H16l-1.7-2.5L11.6 14 9.8 10.6l-1 1.5H6.3" fill="#fff" fill-opacity=".22" stroke="none"/>
+              <path d="M6.3 12.1h3l1-1.5 1.8 3.4 2.7-5.6L16.3 11h4.5" stroke-width="1.8"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <div class="name">ระบบจอง Body Interact</div>
+            <div class="sub">วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ</div>
+          </div>
+        </div>
+        <div class="topbar-spacer"></div>
+        <div class="user-chip">
+          <div class="who"><div class="n" id="uName">—</div><div class="r" id="uRole">—</div></div>
+          <div class="av" id="uAvatar">N</div>
+        </div>
+        <button class="btn btn-soft btn-sm" onclick="App.logout()" title="ออกจากระบบ">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/></svg>
+          ออก
+        </button>
+      </div>
+    </header>
+
+    <nav class="nav" id="nav"></nav>
+    <main class="main" id="main"></main>
+  </div>
+
+  <div class="toast-host" id="toastHost"></div>
+  <div id="modalHost"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -7,7 +7,7 @@
    หลัง deploy Apps Script แล้ว ให้นำ Web App URL มาวางแทนค่าด้านล่าง
    ถ้ายังเป็นค่า PASTE_YOUR... ระบบจะทำงานในโหมดทดลอง (mock data) ให้อัตโนมัติ */
 const CONFIG = {
-  API_URL: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE'
+  API_URL: 'https://script.google.com/macros/s/AKfycbxe4Gld_vKsps_aGSOS_lv8rTxjn6zc1BIl9QG05scSWXqjyx_ZbPQFy6Fygf0pq26P/exec'
 };
 
 const MOCK_MODE = !CONFIG.API_URL || CONFIG.API_URL.indexOf('PASTE_YOUR') === 0;

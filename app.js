@@ -20,9 +20,12 @@ function parseISO(s){ const p=String(s).split('-'); return new Date(+p[0], +p[1]
 const DOW_TH = ['อา','จ','อ','พ','พฤ','ศ','ส'];
 const DOW_KEY = ['sun','mon','tue','wed','thu','fri','sat'];
 const MONTH_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const MONTH_TH_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 function fmtThaiDate(iso){ const d=parseISO(iso); return d.getDate()+' '+MONTH_TH[d.getMonth()]+' '+(d.getFullYear()+543); }
 function fmtThaiShort(iso){ const d=parseISO(iso); return DOW_TH[d.getDay()]+' '+d.getDate()+' '+MONTH_TH[d.getMonth()]; }
 function startOfWeek(d){ const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
+function startOfMonth(d){ const x=new Date(d.getFullYear(), d.getMonth(), 1); x.setHours(0,0,0,0); return x; }
+function addMonths(d,n){ return new Date(d.getFullYear(), d.getMonth()+n, 1); }
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 
 /* ---------- icons ---------- */
@@ -54,6 +57,10 @@ const I = {
   heart:'<path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"'+F+'/><path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"/>',
   cap:'<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"'+F+'/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/>',
   out:'<path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"'+F+'/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/>',
+  key:'<circle cx="8" cy="14" r="4.2"'+F+'/><circle cx="8" cy="14" r="4.2"/><path d="M11 11 20 2"/><path d="M16.5 5.5 19 8M14.5 7.5 17 10"/>',
+  doc:'<path d="M6 3h7l5 5v13H6z"'+F+'/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
+  ext:'<path d="M5 5h6v2H7v10h10v-4h2v6H5z"'+F+'/><path d="M5 5h6v2H7v10h10v-4h2v6H5z"/><path d="M14 5h5v5M19 5l-7 7"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="2.2"'+F+'/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"'+F+'/><rect x="3" y="3" width="7" height="7" rx="2.2"/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"/>',
 };
 function svg(path, cls){ return '<svg '+(cls?'class="'+cls+'" ':'')+'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+path+'</svg>'; }
 
@@ -113,7 +120,47 @@ const App = {
       await App.enterApp();
     } else {
       $('loginView').classList.remove('hidden');
+      App.renderLoginCal();
     }
+  },
+
+  loginMonthShift(n){
+    State._loginMonth = addMonths(State._loginMonth || startOfMonth(new Date()), n);
+    App.renderLoginCal();
+  },
+
+  async renderLoginCal(){
+    const grid = $('loginCal'); if (!grid) return;
+    const base = State._loginMonth || (State._loginMonth = startOfMonth(new Date()));
+    $('loginCalLabel').textContent = MONTH_TH_FULL[base.getMonth()] + ' ' + (base.getFullYear()+543);
+
+    // ช่วงตาราง: เริ่มจันทร์ของสัปดาห์ที่มีวันที่ 1 → 6 สัปดาห์
+    const first = startOfWeek(base);
+    const cells = [];
+    for (let i=0;i<42;i++) cells.push(addDays(first, i));
+    const from = toISO(cells[0]), to = toISO(cells[41]);
+
+    grid.innerHTML = '<div class="mc-loading"><div class="spinner"></div></div>';
+    let all = [];
+    try {
+      const bk = await api('getBookings', { from, to });
+      all = (bk.bookings||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
+    } catch(e){ all = []; }
+
+    const dows = ['จ','อ','พ','พฤ','ศ','ส','อา'];
+    let head = dows.map(d=>`<div class="mc-dow">${d}</div>`).join('');
+    let body = '';
+    cells.forEach(d=>{
+      const iso = toISO(d);
+      const inMonth = d.getMonth()===base.getMonth();
+      const isToday = iso===todayISO();
+      const cnt = all.filter(b=>b.date===iso).length;
+      body += `<div class="mc-cell ${inMonth?'':'out'} ${isToday?'today':''}">
+        <span class="mc-d">${d.getDate()}</span>
+        ${cnt>0?`<span class="mc-badge">${cnt}</span>`:''}
+      </div>`;
+    });
+    grid.innerHTML = `<div class="mc-grid mc-head">${head}</div><div class="mc-grid mc-body">${body}</div>`;
   },
 
   switchLoginTab(tab){
@@ -197,6 +244,8 @@ const App = {
         ['tdash', I.dash, 'ภาพรวม'],
         ['tbookings', I.list, 'การจองทั้งหมด'],
         ['tcal', I.cal, 'ปฏิทิน'],
+        ['tscenarios', I.grid, 'Scenarios'],
+        ['tbi', I.key, 'บัญชี BI'],
         ['treport', I.report, 'รายงาน'],
         ['tsettings', I.gear, 'ตั้งค่า'],
       ];
@@ -205,6 +254,8 @@ const App = {
         ['tdash', I.dash, 'ภาพรวม'],
         ['tbookings', I.list, 'การจองทั้งหมด'],
         ['tcal', I.cal, 'ปฏิทิน'],
+        ['tscenarios', I.grid, 'Scenarios'],
+        ['tbi', I.key, 'บัญชี BI'],
         ['treport', I.report, 'รายงาน'],
       ];
     } else {
@@ -594,6 +645,154 @@ App.saveSettings = async function(){
 /* =========================================================
    COMPONENTS (HTML builders)
    ========================================================= */
+function levelBadge(lv){
+  const map = { Basic:'lv-basic', Intermediate:'lv-inter', Advanced:'lv-adv' };
+  const th = { Basic:'พื้นฐาน', Intermediate:'ปานกลาง', Advanced:'ขั้นสูง' };
+  return `<span class="lv ${map[lv]||''}"><span class="lv-bars"><i></i><i></i><i></i></span>${esc(lv)}${th[lv]?` · ${th[lv]}`:''}</span>`;
+}
+
+/* ---------- อาจารย์/ผู้ดูแล: Scenarios ---------- */
+Views.tscenarios = async function(m){
+  const r = await api('getScenarios');
+  const all = r.scenarios || [];
+  State._scn = all;
+  const lv = State._scnLv || 'all';
+  const q = (State._scnQ || '').toLowerCase();
+  let list = all;
+  if (lv!=='all') list = list.filter(s=>s.level===lv);
+  if (q) list = list.filter(s=> (s.title+' '+s.no+' '+s.room).toLowerCase().includes(q));
+
+  const chip = (val,label)=>`<button class="chip ${lv===val?'active':''}" onclick="Views.scnFilter('${val}')">${label}</button>`;
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>Scenarios สำหรับฝึก</h2><span class="hint">${all.length} เคส · คลิกเพื่อดูรายละเอียด</span></div>
+      <div class="card">
+        <div class="scn-tools">
+          <input class="input" placeholder="ค้นหาเคส / หมายเลข / ห้อง…" value="${esc(State._scnQ||'')}" oninput="Views.scnSearch(this.value)" />
+          <div class="chips">${chip('all','ทั้งหมด')}${chip('Basic','พื้นฐาน')}${chip('Intermediate','ปานกลาง')}${chip('Advanced','ขั้นสูง')}</div>
+        </div>
+        <div class="scn-list">
+          ${list.length ? list.map(scnRow).join('') : emptyState('🔍','ไม่พบเคสที่ค้นหา','ลองเปลี่ยนคำค้นหรือตัวกรอง')}
+        </div>
+      </div>
+    </div>`;
+};
+Views.scnFilter = function(v){ State._scnLv = v; App.go('tscenarios'); };
+Views.scnSearch = function(v){ State._scnQ = v; clearTimeout(Views._scnT); Views._scnT = setTimeout(()=>App.go('tscenarios'), 250); };
+function scnRow(s){
+  return `<div class="scn-item" onclick="Views.scnDetail('${esc(s.no)}')">
+    <div class="scn-no">#${esc(s.no)}</div>
+    <div class="scn-main">
+      <div class="scn-title">${esc(s.title)}</div>
+      <div class="scn-meta"><span>${esc(s.room)}</span> · ${levelBadge(s.level)}</div>
+    </div>
+    <button class="btn btn-soft btn-sm scn-pdf" onclick="event.stopPropagation();Views.scnPdf('${esc(s.no)}')">${svg(I.doc)}PDF</button>
+  </div>`;
+}
+Views.scnDetail = function(no){
+  const s = (State._scn||[]).find(x=>String(x.no)===String(no)); if(!s) return;
+  openModal(`
+    <div class="scn-modal">
+      <div class="scn-modal-no">#${esc(s.no)}</div>
+      <h3 style="margin:6px 0 10px">${esc(s.title)}</h3>
+      <div class="kv"><span>ห้อง/สถานการณ์</span><b>${esc(s.room)}</b></div>
+      <div class="kv"><span>ระดับความยาก</span><b>${levelBadge(s.level)}</b></div>
+      <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="Views.scnPdf('${esc(s.no)}')">${svg(I.doc)}เปิดไฟล์ PDF รายละเอียด</button>
+    </div>`);
+};
+Views.scnPdf = function(no){
+  const s = (State._scn||[]).find(x=>String(x.no)===String(no)); if(!s) return;
+  if (s.pdf){ window.open(s.pdf, '_blank', 'noopener'); }
+  else { toast('ยังไม่ได้แนบไฟล์ PDF สำหรับเคสนี้ (ผู้ดูแลเพิ่มได้ในชีต Scenarios)', 'err'); }
+};
+
+/* ---------- อาจารย์/ผู้ดูแล: บัญชีเข้าใช้ Body Interact ---------- */
+Views.tbi = async function(m){
+  const r = await api('getBIAccounts', { role:State.user.role, user_id:State.user.user_id });
+  const list = r.accounts || [];
+  const admin = isAdmin();
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>บัญชีเข้าใช้ Body Interact</h2>
+        <span class="hint">${admin?'เพิ่มบัญชี · อนุมัติคำขอ · ดูรหัสผ่านได้ทุกบัญชี':'เลือกขอใช้ username · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ'}</span></div>
+
+      ${admin ? `<div class="card" style="margin-bottom:16px">
+        <h3 style="margin-bottom:12px">เพิ่มบัญชีใหม่</h3>
+        <div class="grid cols-2">
+          <div class="field"><label for="biUser">Username (BI)</label><input class="input" id="biUser" placeholder="เช่น bcnb-bi-05" /></div>
+          <div class="field"><label for="biPass">Password</label><input class="input" id="biPass" placeholder="รหัสผ่านของบัญชีนี้" /></div>
+        </div>
+        <button class="btn btn-primary" onclick="Views.biAdd()">${svg(I.plus)}เพิ่มบัญชี</button>
+      </div>` : `<div class="login-note" style="margin:0 0 16px">${svg(I.info)}<span>เลือก “ขอใช้งาน” บัญชีที่ว่าง เมื่อผู้ดูแลระบบอนุมัติแล้ว ระบบจะแสดงรหัสผ่านให้เฉพาะคุณ</span></div>`}
+
+      <div class="card">
+        <div class="bi-list">
+          ${list.length ? list.map(a=>biCard(a, admin)).join('') : emptyState('🔑','ยังไม่มีบัญชี', admin?'เพิ่มบัญชีด้านบนได้เลย':'รอผู้ดูแลเพิ่มบัญชี')}
+        </div>
+      </div>
+    </div>`;
+};
+function biCard(a, admin){
+  const mine = a.holder_id===State.user.user_id;
+  let right = '';
+  if (admin){
+    right = `${a.status==='pending'?`<button class="btn btn-primary btn-sm" onclick="Views.biApprove('${a.account_id}')">${svg(I.check)}อนุมัติ</button>`:''}
+      ${a.status!=='available'?`<button class="btn btn-warn btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`:''}
+      <button class="btn btn-danger btn-sm" onclick="Views.biDelete('${a.account_id}')">${svg(I.x)}ลบ</button>`;
+  } else {
+    if (a.status==='available') right = `<button class="btn btn-primary btn-sm" onclick="Views.biRequest('${a.account_id}')">${svg(I.key)}ขอใช้งาน</button>`;
+    else if (a.status==='pending' && mine) right = `<span class="badge pending">รออนุมัติ</span>`;
+    else if (a.status==='approved' && mine) right = `<button class="btn btn-soft btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`;
+    else right = `<span class="badge" style="background:#EEF1F0;color:#8A9794">ไม่ว่าง</span>`;
+  }
+  // แถวรหัสผ่าน: แสดงเมื่อ backend ส่ง password มา (admin = ทุกอัน, teacher = ของตัวเองที่อนุมัติแล้ว)
+  const pwRow = (a.password!==undefined)
+    ? `<div class="bi-pass">${svg(I.key)}<span>รหัสผ่าน:</span><code>${esc(a.password)}</code></div>`
+    : (a.status==='approved' && mine ? '' : `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>`);
+  const who = a.holder_name ? `<span class="bi-holder">${a.status==='approved'?'ผู้ใช้:':'ผู้ขอ:'} ${esc(a.holder_name)}</span>` : '';
+  return `<div class="bi-item">
+    <div class="bi-main">
+      <div class="bi-user">${svg(I.user)}<b>${esc(a.username)}</b> ${biStatusBadge(a.status)}</div>
+      ${who}
+      ${(admin || (a.status==='approved'&&mine)) ? pwRow : (a.status==='pending'&&mine ? `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>` : '')}
+    </div>
+    <div class="bi-actions">${right}</div>
+  </div>`;
+}
+function biStatusBadge(s){
+  const map = { available:['ว่าง','approved'], pending:['รออนุมัติ','pending'], approved:['ใช้งานอยู่','in'] };
+  const v = map[s]||[s,'']; return `<span class="badge ${v[1]}">${v[0]}</span>`;
+}
+Views.biAdd = async function(){
+  const username = $('biUser').value.trim(), password = $('biPass').value.trim();
+  if (!username || !password) return toast('กรอก username และ password','err');
+  const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password });
+  if (r.error) return toast(r.error,'err'); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
+};
+Views.biRequest = async function(id){
+  const r = await api('requestBIAccount', { account_id:id, user_id:State.user.user_id, name:State.user.name });
+  if (r.error) return toast(r.error,'err'); toast('ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ','ok'); App.go('tbi');
+};
+Views.biApprove = async function(id){
+  const r = await api('approveBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
+  if (r.error) return toast(r.error,'err'); toast('อนุมัติแล้ว','ok'); App.go('tbi');
+};
+Views.biRelease = function(id){
+  confirmModal('คืนบัญชี','ปล่อยบัญชีนี้กลับเป็นสถานะว่าง?','คืนบัญชี', async ()=>{
+    const r = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('คืนบัญชีแล้ว','ok'); App.go('tbi');
+  });
+};
+Views.biDelete = function(id){
+  confirmModal('ลบบัญชี','ลบบัญชี BI นี้ถาวร?','ลบ', async ()=>{
+    const r = await api('deleteBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('ลบบัญชีแล้ว','ok'); App.go('tbi');
+  });
+};
+
+/* =========================================================
+   COMPONENTS (HTML builders) — เดิม
+   ========================================================= */
 function stat(color, icon, num, label){
   return `<div class="stat ${color}"><div class="ico">${svg(icon)}</div><div><div class="num">${num}</div><div class="lab">${label}</div></div></div>`;
 }
@@ -747,6 +946,18 @@ function confirmModal(title, sub, okLabel, onOk){
 }
 App._closeModal = function(){ $('modalHost').innerHTML=''; };
 
+/* modal เนื้อหาอิสระ (เช่น รายละเอียด scenario / บัญชี BI) */
+function openModal(html, wide){
+  const host = $('modalHost');
+  host.innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal ${wide?'modal-wide':''}">
+      ${html}
+      <div class="modal-actions" style="margin-top:18px">
+        <button class="btn btn-soft btn-block" onclick="App._closeModal()">ปิด</button>
+      </div>
+    </div></div>`;
+}
+
 function setLoading(btn, on, restore){
   if (!btn) return;
   if (on){ btn.dataset._t = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>'; }
@@ -801,6 +1012,47 @@ const MockAPI = (function(){
     mk('1100702345678','นภา ศรีสุข',       2, '09:00-10:00', 1, 'Stroke', 'approved', false),
     mk('1100703456789','ธีรเดช มั่นคง',     -2,'10:00-11:00', 2, 'ACS', 'approved', true),
     mk('1100704567890','พิมพ์ชนก ใจงาม',   -1,'11:00-12:00', 1, 'Sepsis', 'approved', true),
+  ];
+
+  // ===== Scenarios (จากแคตตาล็อก Body Interact) =====
+  let scenarios = [
+    { no:'115', title:'Pre-eclampsia seizure at 29 Weeks in Primigravid', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'238', title:'Acute pyelonephritis', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'297', title:'Umbilical cord prolapse', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'315', title:'Preterm labour', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'316', title:'First stage labor at home', room:'Living Room', level:'Basic', pdf:'' },
+    { no:'350', title:'Postpartum hemorrhage', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'370', title:'Anaphylaxis reaction after propofol administration', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'408', title:'Pyelonephritis with lower back pain and fever', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'454', title:'Multiple Fractures, Dyspnea, and Chest Pain After Fall', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'471', title:'Traumatic brain injury with head wound', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'474', title:'Anxiety crisis', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'499', title:'COPD exacerbation with shortness of breath', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'536', title:'Asthma exacerbation', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'590', title:'Schizophrenia with agitation', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'594', title:'Acute appendicitis with perforation', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'599', title:'Urinary tract infection and fever', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'600', title:'Viral gastroenteritis and dehydration', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'691', title:'Child with pneumonia', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'701', title:'Diabetic ketoacidosis with vomiting, and hypovolemic shock', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'832', title:'Anaphylactic shock due to food allergy', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'881', title:'Preparing for discharge with family education', room:'Inpatient Room', level:'Basic', pdf:'' },
+    { no:'899', title:'Sepsis due to pneumonia', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'940', title:'Alcohol use disorder', room:'Consultation', level:'Intermediate', pdf:'' },
+    { no:'942', title:'Adolescent suicide risk', room:'Consultation', level:'Basic', pdf:'' },
+    { no:'963', title:'Cardiac arrest after angioplasty', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'1009', title:'Smoking cessation in consultation', room:'Consultation', level:'Intermediate', pdf:'' },
+    { no:'1024', title:'Triage of Chest Pain in Emergency Department #3', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'1276', title:'Shoulder dystocia at 39 weeks pregnant', room:'Emergency Room', level:'Intermediate', pdf:'' },
+  ];
+
+  // ===== บัญชีเข้าใช้ Body Interact (admin เพิ่ม / teacher ขอใช้) =====
+  let biSeq = 1;
+  let biAccounts = [
+    { account_id:'BI1', username:'bcnb-bi-01', password:'BodyInt@01', status:'available', holder_id:'', holder_name:'', updated_at:new Date().toISOString() },
+    { account_id:'BI2', username:'bcnb-bi-02', password:'BodyInt@02', status:'available', holder_id:'', holder_name:'', updated_at:new Date().toISOString() },
+    { account_id:'BI3', username:'bcnb-bi-03', password:'BodyInt@03', status:'pending', holder_id:'t002', holder_name:'อ. สมหญิง รักเรียน', updated_at:new Date().toISOString() },
+    { account_id:'BI4', username:'bcnb-bi-04', password:'BodyInt@04', status:'approved', holder_id:'t001', holder_name:'อ.ดร. ปวีณา ใจดี', updated_at:new Date().toISOString() },
   ];
 
   function slotsArr(){ return settings.time_slots; }
@@ -912,6 +1164,53 @@ const MockAPI = (function(){
         b.checked_in='yes'; return { ok:true };
       }
       case 'getUsers': return { users: JSON.parse(JSON.stringify(users)) };
+      case 'getScenarios': return { scenarios: JSON.parse(JSON.stringify(scenarios)) };
+      case 'getBIAccounts': {
+        const role = p.role; const uid = String(p.user_id||'');
+        const list = biAccounts.map(a=>{
+          const o = { account_id:a.account_id, username:a.username, status:a.status, holder_id:a.holder_id, holder_name:a.holder_name };
+          // เห็น password ได้: admin เห็นทุกอัน / teacher เห็นเฉพาะของตัวเองที่อนุมัติแล้ว
+          if (role==='admin' || (a.status==='approved' && a.holder_id===uid)) o.password = a.password;
+          return o;
+        });
+        return { accounts: list };
+      }
+      case 'addBIAccount': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
+        const u = String(p.username||'').trim(); const pw = String(p.password||'').trim();
+        if (!u || !pw) return { error:'กรุณากรอก username และ password' };
+        biAccounts.push({ account_id:'BI'+(100+biSeq++), username:u, password:pw, status:'available', holder_id:'', holder_name:'', updated_at:new Date().toISOString() });
+        return { ok:true };
+      }
+      case 'requestBIAccount': {
+        const a = biAccounts.find(x=>x.account_id===p.account_id);
+        if (!a) return { error:'ไม่พบบัญชีนี้' };
+        if (a.status!=='available') return { error:'บัญชีนี้ถูกใช้งานอยู่' };
+        a.status='pending'; a.holder_id=String(p.user_id||''); a.holder_name=String(p.name||''); a.updated_at=new Date().toISOString();
+        return { ok:true };
+      }
+      case 'approveBIAccount': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
+        const a = biAccounts.find(x=>x.account_id===p.account_id);
+        if (!a) return { error:'ไม่พบบัญชีนี้' };
+        if (a.status!=='pending') return { error:'บัญชีนี้ไม่มีคำขอที่รออนุมัติ' };
+        a.status='approved'; a.updated_at=new Date().toISOString();
+        return { ok:true };
+      }
+      case 'releaseBIAccount': {
+        const a = biAccounts.find(x=>x.account_id===p.account_id);
+        if (!a) return { error:'ไม่พบบัญชีนี้' };
+        // admin คืนได้ทุกบัญชี / teacher คืนได้เฉพาะของตัวเอง
+        if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return { error:'คืนได้เฉพาะบัญชีของตัวเอง' };
+        a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
+        return { ok:true };
+      }
+      case 'deleteBIAccount': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
+        const i = biAccounts.findIndex(x=>x.account_id===p.account_id);
+        if (i===-1) return { error:'ไม่พบบัญชีนี้' };
+        biAccounts.splice(i,1); return { ok:true };
+      }
       case 'getStats': {
         const today = todayISO();
         const todays = bookings.filter(b=>b.date===today && b.status!=='cancelled' && b.status!=='rejected');

@@ -1,4 +1,3 @@
-# BIBDB
 # ระบบจอง Body Interact — วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ
 
 ระบบกำกับติดตามการจองเข้าใช้งานโปรแกรม Body Interact (Virtual Patient Simulation)
@@ -59,6 +58,23 @@
 |---|---|---|
 
 - ใส่แค่ header — ระบบบันทึก audit log ให้เอง
+
+### ชีต `Scenarios` (รายการเคสฝึก — เห็นเฉพาะอาจารย์/ผู้ดูแล)
+| scenario_no | title | room | level | pdf_url |
+|---|---|---|---|---|
+| 115 | Pre-eclampsia seizure at 29 Weeks in Primigravid | Emergency Room | Intermediate | (ลิงก์ไฟล์ PDF ถ้ามี) |
+
+- `level` ใส่ `Basic` / `Intermediate` / `Advanced`
+- `pdf_url` ใส่ลิงก์ไฟล์ PDF ของเคส (เว้นว่างได้ ระบบจะแจ้งว่ายังไม่มีไฟล์)
+- มีรายการตัวอย่าง 28 เคสให้แล้วใน “ข้อมูลตัวอย่าง” ด้านล่าง
+
+### ชีต `BIAccounts` (บัญชีเข้าใช้โปรแกรม Body Interact)
+| account_id | username | password | status | holder_id | holder_name | updated_at |
+|---|---|---|---|---|---|---|
+
+- `status`: `available` (ว่าง) / `pending` (รออนุมัติ) / `approved` (อนุมัติแล้ว–ใช้งานอยู่)
+- ผู้ดูแลระบบเป็นผู้ **เพิ่ม** username + password · อาจารย์ **เลือกขอใช้** · เห็น password ได้เฉพาะบัญชีของตัวเองที่อนุมัติแล้ว
+- `holder_id` / `holder_name` ระบบเติมให้เองตอนอาจารย์กดขอใช้
 
 ---
 
@@ -148,6 +164,45 @@ const CONFIG = {
 
 > ⚠️ เลขบัตรประชาชนด้านบนเป็นตัวอย่างสำหรับทดสอบเท่านั้น และควรเปลี่ยนรหัสผ่านตัวอย่างก่อนใช้งานจริง
 
+**บัญชี Body Interact** (ชีต `BIAccounts` — ผู้ดูแลเพิ่ม):
+| account_id | username | password | status | holder_id | holder_name |
+|---|---|---|---|---|---|
+| BI1 | bcnb-bi-01 | BodyInt@01 | available |  |  |
+| BI2 | bcnb-bi-02 | BodyInt@02 | available |  |  |
+
+**Scenarios** (ชีต `Scenarios` — วาง 28 แถว, แสดงเฉพาะ `scenario_no, title, room, level`):
+
+```
+115  | Pre-eclampsia seizure at 29 Weeks in Primigravid | Emergency Room | Intermediate
+238  | Acute pyelonephritis                              | Emergency Room | Intermediate
+297  | Umbilical cord prolapse                           | Emergency Room | Intermediate
+315  | Preterm labour                                    | Emergency Room | Intermediate
+316  | First stage labor at home                         | Living Room    | Basic
+350  | Postpartum hemorrhage                             | Emergency Room | Intermediate
+370  | Anaphylaxis reaction after propofol administration| Emergency Room | Advanced
+408  | Pyelonephritis with lower back pain and fever     | Emergency Room | Basic
+454  | Multiple Fractures, Dyspnea, and Chest Pain After Fall | Emergency Room | Intermediate
+471  | Traumatic brain injury with head wound            | Emergency Room | Advanced
+474  | Anxiety crisis                                    | Emergency Room | Basic
+499  | COPD exacerbation with shortness of breath        | Emergency Room | Intermediate
+536  | Asthma exacerbation                               | Emergency Room | Intermediate
+590  | Schizophrenia with agitation                      | Emergency Room | Basic
+594  | Acute appendicitis with perforation               | Emergency Room | Advanced
+599  | Urinary tract infection and fever                 | Emergency Room | Basic
+600  | Viral gastroenteritis and dehydration             | Emergency Room | Intermediate
+691  | Child with pneumonia                              | Emergency Room | Intermediate
+701  | Diabetic ketoacidosis with vomiting, and hypovolemic shock | Emergency Room | Intermediate
+832  | Anaphylactic shock due to food allergy            | Emergency Room | Intermediate
+881  | Preparing for discharge with family education     | Inpatient Room | Basic
+899  | Sepsis due to pneumonia                           | Emergency Room | Advanced
+940  | Alcohol use disorder                              | Consultation   | Intermediate
+942  | Adolescent suicide risk                           | Consultation   | Basic
+963  | Cardiac arrest after angioplasty                  | Emergency Room | Intermediate
+1009 | Smoking cessation in consultation                 | Consultation   | Intermediate
+1024 | Triage of Chest Pain in Emergency Department #3   | Emergency Room | Intermediate
+1276 | Shoulder dystocia at 39 weeks pregnant            | Emergency Room | Intermediate
+```
+
 ---
 
 ## 🔐 สิทธิ์การใช้งานแต่ละบทบาท
@@ -163,6 +218,9 @@ const CONFIG = {
 | ยกเลิกการจองของผู้อื่น | – | ✅ | ✅ |
 | ลบการจองถาวร | – | – | ✅ |
 | รายงานสรุป + Export CSV | – | ✅ | ✅ |
+| ดู Scenarios + เปิดไฟล์ PDF | – | ✅ | ✅ |
+| ขอใช้ username Body Interact | – | ✅ | – |
+| เพิ่ม/อนุมัติ/ลบ บัญชี Body Interact | – | – | ✅ |
 | ตั้งค่าระบบ (จำนวนเครื่อง/วัน/รอบเวลา) | – | – | ✅ |
 
 > ระบบเช็คที่ว่างของแต่ละรอบให้อัตโนมัติก่อนยืนยันการจองทุกครั้ง และใช้ `LockService` กันการจองชนกัน
@@ -186,6 +244,13 @@ const CONFIG = {
 | `getStats` | อาจารย์/ผู้ดูแล | – | ตัวเลขสรุป |
 | `getReport` | อาจารย์/ผู้ดูแล | from, to (เลือกใส่) | `{by_user, by_case}` |
 | `getUsers` | อาจารย์/ผู้ดูแล | – | `{users:[]}` |
+| `getScenarios` | อาจารย์/ผู้ดูแล | – | `{scenarios:[]}` |
+| `getBIAccounts` | อาจารย์/ผู้ดูแล | role, user_id | `{accounts:[]}` (password เฉพาะที่มีสิทธิ์) |
+| `addBIAccount` | ผู้ดูแลเท่านั้น | actor_id, username, password | `{ok}` |
+| `requestBIAccount` | อาจารย์ | account_id, user_id, name | `{ok}` |
+| `approveBIAccount` | ผู้ดูแลเท่านั้น | account_id, actor_id | `{ok}` |
+| `releaseBIAccount` | เจ้าของ/ผู้ดูแล | account_id, role, user_id | `{ok}` |
+| `deleteBIAccount` | ผู้ดูแลเท่านั้น | account_id, actor_id | `{ok}` |
 
 **กลไกสำคัญ**
 - ใช้ `LockService` ตอน `createBooking` เพื่อกันการจองชนกัน (race condition)

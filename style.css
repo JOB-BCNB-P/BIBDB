@@ -412,7 +412,7 @@ tbody tr:hover { background: #FAFCFB; }
    ========================================================= */
 .login-grid {
   width: 100%; max-width: 880px;
-  display: grid; grid-template-columns: 430px 1fr; gap: 22px;
+  display: grid; grid-template-columns: 1fr 430px; gap: 22px;
   align-items: start;
 }
 .login-card { order: 1; }
@@ -483,16 +483,27 @@ tbody tr:hover { background: #FAFCFB; }
 .login-footer .lf-web { margin-bottom: 16px; }
 .qr-block {
   background: var(--card); border-radius: 22px; box-shadow: var(--shadow);
-  padding: 18px 22px 20px; display: inline-block; max-width: 460px;
+  padding: 18px 26px 20px; display: inline-block; max-width: 460px;
 }
-.qr-caption { font-weight: 600; color: var(--ink); font-size: .92rem; margin-bottom: 14px; }
-.qr-row { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
-.qr-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.qr-caption { font-weight: 600; color: var(--ink); font-size: .92rem; margin-bottom: 14px; text-align: center; }
+.qr-row {
+  display: flex; flex-direction: row; flex-wrap: nowrap;
+  gap: 26px; justify-content: center; align-items: flex-start;
+}
+.qr-item {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  background: #F8FBFA; border: 1px solid #EEF2F1; border-radius: 16px;
+  padding: 14px 16px 12px;
+}
 .qr-item img {
   width: 120px; height: 120px; border-radius: 14px; background: #fff;
   padding: 8px; box-shadow: var(--shadow-sm); border: 1px solid #EEF2F1;
+  display: block;
 }
-.qr-item span { font-size: .82rem; color: var(--muted); font-weight: 600; }
+.qr-item span { font-size: .82rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
+@media (max-width: 420px){
+  .qr-row { flex-wrap: wrap; }
+}
 
 /* =========================================================
    SCENARIOS

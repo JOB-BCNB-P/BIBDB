@@ -386,10 +386,24 @@ Views.loadSlots = async function(dateISO){
     area.innerHTML = emptyState('🚫','วันนี้ไม่เปิดให้จอง','กรุณาเลือกวันทำการตามที่ระบุด้านบน');
     return;
   }
-  const av = await api('getAvailability', { date: dateISO });
+  // โหลดรอบว่าง + Scenarios + รายชื่อผู้ใช้ (cache ไว้ ไม่ดึงซ้ำเมื่อเปลี่ยนวัน)
+  const [av, sc, us] = await Promise.all([
+    api('getAvailability', { date: dateISO }),
+    Views._scnCache ? Promise.resolve(Views._scnCache) : api('getScenarios'),
+    Views._userCache ? Promise.resolve(null) : api('getUsers')
+  ]);
   if (av.error){ area.innerHTML = emptyState('⚠️', av.error, ''); return; }
+  if (sc && sc.scenarios) Views._scnCache = sc;
+  if (us && us.users) Views._userCache = us.users;
+  const scnList = ((Views._scnCache||{}).scenarios)||[];
 
   State._selectedSlot = null;
+  Views._members = [];
+  const scnOptions = scnList.map(s=>{
+    const label = (s.no? s.no+' · ':'') + s.title + (s.level? ' ('+s.level+')':'');
+    const val = (s.no? s.no+' · ':'') + s.title;
+    return `<option value="${esc(val)}">${esc(label)}</option>`;
+  }).join('');
   area.innerHTML = `
     <div class="field"><label>เลือกรอบเวลา</label>
       <div class="slot-grid">
@@ -399,8 +413,11 @@ Views.loadSlots = async function(dateISO){
     <div id="bookForm" class="hidden">
       <div class="grid cols-2">
         <div class="field">
-          <label for="bkCase">หัวข้อ / เคสที่จะฝึก</label>
-          <input class="input" id="bkCase" placeholder="เช่น ภาวะช็อก, ACS, Sepsis" />
+          <label for="bkCase">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios)</label>
+          <select class="input" id="bkCase">
+            <option value="">— เลือก Scenario —</option>
+            ${scnOptions}
+          </select>
         </div>
         <div class="field">
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
@@ -408,11 +425,74 @@ Views.loadSlots = async function(dateISO){
         </div>
       </div>
       <div class="field">
-        <label for="bkGroup">รายชื่อสมาชิกในกลุ่ม (ถ้ามี)</label>
-        <input class="input" id="bkGroup" placeholder="ชื่อเพื่อนร่วมฝึก คั่นด้วยจุลภาค" />
+        <label for="bkNote">หมายเหตุเกี่ยวกับ Scenario ที่เลือก (ถ้ามี)</label>
+        <textarea class="input" id="bkNote" rows="2" placeholder="เช่น จุดที่ต้องการเน้นฝึก อุปกรณ์เพิ่มเติม ฯลฯ"></textarea>
+      </div>
+      <div class="field">
+        <label for="bkMemberSearch">รายชื่อสมาชิกในกลุ่ม (ถ้ามี)</label>
+        <div class="member-picker" id="memberPicker">
+          <div id="bkChips" class="member-chips"></div>
+          <input class="input" id="bkMemberSearch" placeholder="พิมพ์ชื่อเพื่อค้นหา แล้วกดเลือก…" autocomplete="off"
+                 oninput="Views.memberSearch(this.value)" onfocus="Views.memberSearch(this.value)" />
+          <div id="bkMemberList" class="member-list hidden"></div>
+        </div>
+        <div class="help">เลือกได้เฉพาะอาจารย์และนักศึกษาด้วยกันเท่านั้น</div>
       </div>
       <button class="btn btn-primary btn-block" onclick="Views.submitBooking()">${svg(I.check)}ยืนยันการจอง</button>
     </div>`;
+
+  // ปิดรายการค้นหาเมื่อคลิกนอกกล่อง (ผูกครั้งเดียว)
+  if (!Views._memberDocBound){
+    Views._memberDocBound = true;
+    document.addEventListener('click', (e)=>{
+      const mp = $('memberPicker');
+      const list = $('bkMemberList');
+      if (mp && list && !mp.contains(e.target)) list.classList.add('hidden');
+    });
+  }
+};
+
+/* ---------- เลือกสมาชิกกลุ่ม (ค้นหาจากรายชื่อผู้ใช้) ---------- */
+Views._members = [];
+Views.memberSearch = function(q){
+  const list = $('bkMemberList'); if (!list) return;
+  q = String(q||'').trim().toLowerCase();
+  const pool = (Views._userCache||[]).filter(u=>
+    (u.role==='student' || u.role==='teacher') &&            // เฉพาะอาจารย์และนักศึกษา
+    String(u.user_id)!==String(State.user.user_id) &&        // ไม่รวมตัวเอง
+    !Views._members.some(m=>String(m.user_id)===String(u.user_id)) &&
+    (!q || u.name.toLowerCase().includes(q) || String(u.class_group||'').toLowerCase().includes(q))
+  );
+  list.innerHTML = pool.length
+    ? pool.slice(0,8).map(u=>`
+        <button type="button" class="member-opt" onclick="Views.addMember('${esc(String(u.user_id))}')">
+          <span class="mo-name">${esc(u.name)}</span>
+          <span class="mo-role">${u.role==='teacher' ? 'อาจารย์' : esc(u.class_group||'นักศึกษา')}</span>
+        </button>`).join('')
+    : '<div class="member-empty">ไม่พบรายชื่อที่ค้นหา</div>';
+  list.classList.remove('hidden');
+};
+Views.addMember = function(uid){
+  const u = (Views._userCache||[]).find(x=>String(x.user_id)===String(uid));
+  if (!u) return;
+  Views._members.push({ user_id:u.user_id, name:u.name, role:u.role });
+  const inp = $('bkMemberSearch'); if (inp){ inp.value=''; inp.focus(); }
+  $('bkMemberList').classList.add('hidden');
+  Views.renderMemberChips();
+};
+Views.removeMember = function(uid){
+  Views._members = Views._members.filter(m=>String(m.user_id)!==String(uid));
+  Views.renderMemberChips();
+};
+Views.renderMemberChips = function(){
+  const host = $('bkChips'); if (!host) return;
+  host.innerHTML = Views._members.map(m=>`
+    <span class="member-chip ${m.role}">
+      ${esc(m.name)}
+      <button type="button" onclick="Views.removeMember('${esc(String(m.user_id))}')" aria-label="ลบ ${esc(m.name)}">&times;</button>
+    </span>`).join('');
+  // อัปเดตจำนวนผู้เข้าฝึกอัตโนมัติ (ตัวเอง + สมาชิก) — ผู้ใช้แก้เองได้
+  const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
 };
 
 Views.pickSlot = function(el, slot){
@@ -425,14 +505,16 @@ Views.pickSlot = function(el, slot){
 
 Views.submitBooking = async function(){
   if (!State._selectedSlot) return toast('กรุณาเลือกรอบเวลา', 'err');
+  if (!$('bkCase').value) return toast('กรุณาเลือก Scenario ที่จะฝึก', 'err');
   const btn = event.target;
   setLoading(btn, true);
   const r = await api('createBooking', {
     user_id: State.user.user_id, name: State.user.name, role:'student',
     date: State.bookDate, slot: State._selectedSlot,
-    subject_case: $('bkCase').value.trim(),
+    subject_case: $('bkCase').value,
+    note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value,10)||1,
-    group_members: $('bkGroup').value.trim()
+    group_members: Views._members.map(m=>m.name).join(', ')
   });
   setLoading(btn, false, 'ยืนยันการจอง');
   if (r.error) return toast(r.error, 'err');
@@ -843,7 +925,10 @@ function statusBadge(s){
 function dowLabel(k){ return {mon:'จันทร์',tue:'อังคาร',wed:'พุธ',thu:'พฤหัสบดี',fri:'ศุกร์',sat:'เสาร์',sun:'อาทิตย์'}[k]||k; }
 
 function slotCard(s){
-  const dots = Array.from({length:s.total}, (_,i)=> `<span class="dot ${i<s.used?'taken':''}"></span>`).join('');
+  // แสดงจุดแบบสัดส่วน สูงสุด 12 จุด (กันจุดล้นกรอบเมื่อจำนวนเครื่อง/บัญชีเยอะ)
+  const nDots = Math.min(s.total||0, 12);
+  const nTaken = s.total ? Math.round((s.used/s.total)*nDots) : 0;
+  const dots = Array.from({length:nDots}, (_,i)=> `<span class="dot ${i<nTaken?'taken':''}"></span>`).join('');
   const full = s.free<=0;
   const json = esc(JSON.stringify(s.slot));
   return `<button type="button" class="slot ${full?'full':''}" onclick='Views.pickSlot(this, ${json})'>
@@ -875,6 +960,7 @@ function bookingCard(b, withActions){
           ${b.group_size?`<span>${esc(String(b.group_size))} คน</span>`:''}
           ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
           ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
+          ${b.note?`<span>หมายเหตุ: ${esc(b.note)}</span>`:''}
         </div>
       </div>
       ${statusBadge(b.status)}
@@ -1176,7 +1262,7 @@ const MockAPI = (function(){
         const p2 = slot.split('-');
         const rec = { booking_id:'BK'+(1000+seq++), user_id:String(p.user_id), name:p.name, role:'student',
           date, start_time:p2[0], end_time:p2[1], station_no:station, subject_case:p.subject_case||'',
-          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', status:'pending', checked_in:'no', created_at:new Date().toISOString(), note:'' };
+          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', status:'pending', checked_in:'no', created_at:new Date().toISOString(), note:String(p.note||'') };
         bookings.push(rec);
         return { booking: JSON.parse(JSON.stringify(rec)) };
       }

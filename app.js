@@ -143,9 +143,14 @@ const App = {
     grid.innerHTML = '<div class="mc-loading"><div class="spinner"></div></div>';
     let all = [];
     try {
+      if (!State._pubSettings){
+        const st = await api('getSettings');
+        State._pubSettings = st.settings || { total_stations:1, time_slots:[], open_days:['mon','tue','wed','thu','fri'] };
+      }
       const bk = await api('getBookings', { from, to });
       all = (bk.bookings||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
     } catch(e){ all = []; }
+    State._loginBk = all;
 
     const dows = ['จ','อ','พ','พฤ','ศ','ส','อา'];
     let head = dows.map(d=>`<div class="mc-dow">${d}</div>`).join('');
@@ -155,12 +160,47 @@ const App = {
       const inMonth = d.getMonth()===base.getMonth();
       const isToday = iso===todayISO();
       const cnt = all.filter(b=>b.date===iso).length;
-      body += `<div class="mc-cell ${inMonth?'':'out'} ${isToday?'today':''}">
+      const click = inMonth ? ` onclick="App.loginDayDetail('${iso}')"` : '';
+      body += `<div class="mc-cell ${inMonth?'':'out'} ${isToday?'today':''} ${inMonth?'click':''} ${cnt>0?'has':''}"${click}>
         <span class="mc-d">${d.getDate()}</span>
         ${cnt>0?`<span class="mc-badge">${cnt}</span>`:''}
       </div>`;
     });
     grid.innerHTML = `<div class="mc-grid mc-head">${head}</div><div class="mc-grid mc-body">${body}</div>`;
+  },
+
+  loginDayDetail(iso){
+    const s = State._pubSettings || { total_stations:1, time_slots:[] };
+    const day = (State._loginBk||[]).filter(b=>b.date===iso);
+    const slots = s.time_slots || [];
+    let rows;
+    if (!slots.length){
+      rows = `<div class="muted-row">ยังไม่ได้ตั้งค่ารอบเวลา</div>`;
+    } else {
+      rows = slots.map(slot=>{
+        const start = slot.split('-')[0];
+        const inSlot = day.filter(b=>b.start_time===start);
+        const used = inSlot.length;
+        const full = used >= s.total_stations;
+        const free = Math.max(0, s.total_stations - used);
+        const cases = inSlot.map(b=>{
+          const st = b.status==='pending'?'<span class="badge pending">รออนุมัติ</span>':'<span class="badge approved">อนุมัติ</span>';
+          return `<div class="dd-case">${esc(b.subject_case||'ไม่ระบุเคส')} ${st}</div>`;
+        }).join('');
+        return `<div class="dd-slot ${full?'full':''}">
+          <div class="dd-slot-head">
+            <b>${esc(slot)}</b>
+            <span class="${full?'dd-full':'dd-free'}">${full?'เต็ม':('ว่าง '+free+'/'+s.total_stations)}</span>
+          </div>
+          ${cases || '<div class="dd-empty">ยังไม่มีการจอง</div>'}
+        </div>`;
+      }).join('');
+    }
+    openModal(`
+      <div class="dd">
+        <div class="dd-date">${svg(I.cal)} การจองวันที่ ${fmtThaiDate(iso)}</div>
+        <div class="dd-list">${rows}</div>
+      </div>`);
   },
 
   switchLoginTab(tab){

@@ -329,14 +329,14 @@ const Views = {};
 
 /* ---------- นักศึกษา: หน้าหลัก ---------- */
 Views.sdash = async function(m){
-  const [bk, av] = await Promise.all([
+  const [bk, st] = await Promise.all([
     api('getBookings', { user_id: State.user.user_id }),
-    api('getAvailability', { date: todayISO() })
+    api('getStats')
   ]);
   const mine = (bk.bookings||[]);
   const upcoming = mine.filter(b=> b.date>=todayISO() && (b.status==='approved'||b.status==='pending'))
                        .sort((a,b)=> (a.date+a.start_time).localeCompare(b.date+b.start_time));
-  const freeToday = (av.slots||[]).reduce((n,s)=>n+s.free,0);
+  const freeToday = st.free_bi_today||0;
   const pendingCount = mine.filter(b=>b.status==='pending').length;
 
   m.innerHTML = `
@@ -345,7 +345,7 @@ Views.sdash = async function(m){
       <div class="grid cols-3" style="margin-bottom:18px">
         ${stat('mint', I.book, upcoming.length, 'คิวที่กำลังจะถึง')}
         ${stat('warn', I.clock, pendingCount, 'รออนุมัติ')}
-        ${stat('sky', I.pulse, freeToday, 'เครื่องว่างวันนี้')}
+        ${stat('sky', I.pulse, freeToday, 'User ว่างวันนี้')}
       </div>
 
       <div class="card">
@@ -529,7 +529,7 @@ Views.tdash = async function(m){
       <div class="grid cols-4" style="margin-bottom:18px">
         ${stat('mint', I.book, st.bookings_today||0, 'การจองวันนี้')}
         ${stat('warn', I.clock, st.pending||0, 'รออนุมัติ')}
-        ${stat('sky', I.pulse, st.free_slots_today||0, 'เครื่องว่างวันนี้')}
+        ${stat('sky', I.pulse, st.free_bi_today||0, 'User ว่างวันนี้')}
         ${stat('blush', I.report, st.weekly_total||0, 'การใช้งาน 7 วัน')}
       </div>
       <div class="card">
@@ -1260,6 +1260,7 @@ const MockAPI = (function(){
         return { today, bookings_today:todays.length,
           pending: bookings.filter(b=>b.status==='pending').length,
           free_slots_today: av.reduce((n,s)=>n+s.free,0),
+          free_bi_today: biAccounts.filter(a=>a.status==='available').length,
           weekly_total: weekly.length,
           checked_in_today: todays.filter(b=>b.checked_in==='yes').length };
       }

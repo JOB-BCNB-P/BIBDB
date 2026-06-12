@@ -259,7 +259,7 @@ tbody tr:hover { background: #FAFCFB; }
 .slot.full { background: #F7F7F7; cursor: not-allowed; opacity: .75; }
 .slot .time { font-family: var(--font-display); font-weight: 600; font-size: 1rem; }
 .slot .avail { font-size: .82rem; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
-.dots { display: inline-flex; gap: 3px; }
+.dots { display: flex; flex-wrap: wrap; gap: 3px; max-width: 100%; overflow: hidden; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--mint); }
 .dot.taken { background: #DCE5E2; }
 
@@ -504,6 +504,40 @@ tbody tr:hover { background: #FAFCFB; }
 @media (max-width: 420px){
   .qr-row { flex-wrap: wrap; }
 }
+
+/* =========================================================
+   เลือกสมาชิกกลุ่ม (member picker) + ช่องหมายเหตุ
+   ========================================================= */
+textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
+.member-picker { position: relative; }
+.member-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.member-chips:empty { display: none; }
+.member-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--mint-soft); color: var(--mint-deep);
+  border-radius: 999px; padding: 5px 8px 5px 13px;
+  font-size: .85rem; font-weight: 600;
+}
+.member-chip.teacher { background: var(--sky-soft); color: var(--sky-deep); }
+.member-chip button {
+  border: none; background: rgba(255,255,255,.75); color: inherit;
+  width: 19px; height: 19px; border-radius: 50%; cursor: pointer;
+  font-size: .85rem; line-height: 1; display: grid; place-items: center;
+}
+.member-chip button:hover { background: #fff; }
+.member-list {
+  position: absolute; z-index: 40; left: 0; right: 0; top: 100%; margin-top: 6px;
+  background: #fff; border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow); max-height: 250px; overflow: auto;
+}
+.member-opt {
+  display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 10px 14px; border: none; background: none; cursor: pointer; text-align: left;
+}
+.member-opt:hover { background: var(--mint-soft); }
+.member-opt .mo-name { font-weight: 600; color: var(--ink); }
+.member-opt .mo-role { font-size: .78rem; color: var(--muted); flex: none; }
+.member-empty { padding: 12px 14px; color: var(--muted); font-size: .85rem; }
 
 /* =========================================================
    SCENARIOS

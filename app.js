@@ -432,6 +432,11 @@ Views.loadSlots = async function(dateISO){
     return `<option value="${esc(val)}">${esc(label)}</option>`;
   }).join('');
 
+  // รายชื่ออาจารย์ (ผู้สอน/ผู้ควบคุม) — ถ้าอาจารย์เป็นผู้จอง เลือกตัวเองให้อัตโนมัติ
+  const teacherOpts = (Views._userCache||[]).filter(u=>u.role==='teacher').map(t=>
+    `<option value="${esc(t.name)}" ${State.user.role==='teacher'&&String(t.user_id)===String(State.user.user_id)?'selected':''}>${esc(t.name)}</option>`
+  ).join('');
+
   // แผนภาพความว่างรายช่วง 30 นาที
   const steps = av.steps||[];
   const stepChips = steps.map(st=>{
@@ -476,6 +481,13 @@ Views.loadSlots = async function(dateISO){
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
           <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
         </div>
+      </div>
+      <div class="field">
+        <label for="bkTeacher">อาจารย์ผู้สอน / อาจารย์ผู้ควบคุม</label>
+        <select class="input" id="bkTeacher">
+          <option value="">— เลือกอาจารย์ —</option>
+          ${teacherOpts}
+        </select>
       </div>
       <div class="field">
         <label for="bkNote">หมายเหตุเกี่ยวกับ Scenario ที่เลือก (ถ้ามี)</label>
@@ -588,12 +600,14 @@ Views.submitBooking = async function(){
   const end = $('bkEnd') && $('bkEnd').value;
   if (!start || !end) return toast('กรุณาเลือกช่วงเวลา', 'err');
   if (!$('bkCase').value) return toast('กรุณาเลือก Scenario ที่จะฝึก', 'err');
+  if (!$('bkTeacher').value) return toast('กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม', 'err');
   const btn = event.target;
   setLoading(btn, true);
   const r = await api('createBooking', {
     user_id: State.user.user_id, name: State.user.name, role: State.user.role,
     date: State.bookDate, start_time: start, end_time: end,
     subject_case: $('bkCase').value,
+    supervisor: $('bkTeacher').value,
     note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value,10)||1,
     group_members: Views._members.map(m=>m.name).join(', ')
@@ -709,6 +723,7 @@ App.dayDetail = function(iso){
         ${staff?`<b>${esc(b.name)}</b> · `:''}${esc(b.subject_case||'ไม่ระบุเคส')}
         <span style="color:var(--muted)">· เครื่อง #${b.station_no}${b.group_size>1?' · '+b.group_size+' คน':''}</span>
       </div>
+      ${b.supervisor?`<div class="dd-case" style="color:var(--muted)">อาจารย์ผู้ควบคุม: ${esc(b.supervisor)}</div>`:''}
       ${b.group_members?`<div class="dd-case" style="color:var(--muted)">กลุ่ม: ${esc(b.group_members)}</div>`:''}
       ${b.bi_account?`<div class="dd-case">${svg(I.key)} บัญชี BI: <b>${esc(b.bi_account)}</b></div>`:''}
       ${act}
@@ -770,7 +785,7 @@ Views.tbookings = async function(m){
         </div>
         ${filtered.length ? `
         <div class="table-wrap"><table>
-          <thead><tr><th>วันที่</th><th>เวลา</th><th>เครื่อง</th><th>ผู้จอง</th><th>เคส</th><th>บัญชี BI</th><th>สถานะ</th><th>เช็คอิน</th><th>จัดการ</th></tr></thead>
+          <thead><tr><th>วันที่</th><th>เวลา</th><th>เครื่อง</th><th>ผู้จอง</th><th>เคส</th><th>อาจารย์</th><th>บัญชี BI</th><th>สถานะ</th><th>เช็คอิน</th><th>จัดการ</th></tr></thead>
           <tbody>${pg.slice.map(rowBooking).join('')}</tbody>
         </table></div>${pg.html}` : emptyState('🔍','ไม่พบรายการ','ลองเปลี่ยนตัวกรองด้านบน')}
       </div>
@@ -1162,6 +1177,7 @@ function bookingCard(b, withActions){
           <span>เครื่อง <b>#${b.station_no}</b></span>
           ${b.group_size?`<span>${esc(String(b.group_size))} คน</span>`:''}
           ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
+          ${b.supervisor?`<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>`:''}
           ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
           ${b.bi_account?`<span>บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
           ${b.note?`<span>หมายเหตุ: ${esc(b.note)}</span>`:''}
@@ -1183,6 +1199,7 @@ function teacherBookingCard(b){
           <span><b>${fmtThaiShort(b.date)}</b> · ${esc(b.start_time)}–${esc(b.end_time)}</span>
           <span>เครื่อง <b>#${b.station_no}</b></span>
           ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
+          ${b.supervisor?`<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>`:''}
           ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
           ${b.bi_account?`<span>บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
         </div>
@@ -1218,6 +1235,7 @@ function rowBooking(b){
     <td>#${b.station_no}</td>
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case||'—')}</td>
+    <td>${esc(b.supervisor||'—')}</td>
     <td>${b.bi_account?esc(b.bi_account):'<span style="color:var(--muted)">—</span>'}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
@@ -1245,8 +1263,8 @@ function downloadCSV(filename, rows){
 App.exportCSV = async function(){
   const bk = await api('getBookings', {});
   const list = bk.bookings||[];
-  const rows = [['วันที่','เวลาเริ่ม','เวลาจบ','เครื่อง','รหัสผู้จอง','ชื่อ','เคส','จำนวนคน','สมาชิกกลุ่ม','บัญชี BI','สถานะ','เช็คอิน']];
-  list.forEach(b=>rows.push([b.date,b.start_time,b.end_time,b.station_no,b.user_id,b.name,b.subject_case,b.group_size||1,b.group_members,b.bi_account||'',b.status,b.checked_in]));
+  const rows = [['วันที่','เวลาเริ่ม','เวลาจบ','เครื่อง','รหัสผู้จอง','ชื่อ','เคส','อาจารย์ผู้ควบคุม','จำนวนคน','สมาชิกกลุ่ม','บัญชี BI','สถานะ','เช็คอิน']];
+  list.forEach(b=>rows.push([b.date,b.start_time,b.end_time,b.station_no,b.user_id,b.name,b.subject_case,b.supervisor||'',b.group_size||1,b.group_members,b.bi_account||'',b.status,b.checked_in]));
   downloadCSV('bookings_'+todayISO()+'.csv', rows);
   toast('ดาวน์โหลดไฟล์แล้ว','ok');
 };
@@ -1340,7 +1358,8 @@ const MockAPI = (function(){
   let seq = 1;
   const mk = (uid, name, dateOff, start, end, station, cas, status, ci)=>{
     return { booking_id:'BK'+(1000+seq++), user_id:uid, name, role:'student', date:d(dateOff),
-      start_time:start, end_time:end, station_no:station, subject_case:cas, group_size:1, group_members:'',
+      start_time:start, end_time:end, station_no:station, subject_case:cas, supervisor:'อ.ดร. ปวีณา ใจดี',
+      group_size:1, group_members:'',
       bi_account:'', status, checked_in:ci?'yes':'no', created_at:new Date().toISOString(), note:'' };
   };
   let bookings = [
@@ -1484,6 +1503,7 @@ const MockAPI = (function(){
         let station=1; while(usedNos.indexOf(station)!==-1) station++;
         const rec = { booking_id:'BK'+(1000+seq++), user_id:String(p.user_id), name:p.name, role:p.role||'student',
           date, start_time:start, end_time:end, station_no:station, subject_case:p.subject_case||'',
+          supervisor:p.supervisor||'',
           group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', bi_account:'',
           status:'pending', checked_in:'no', created_at:new Date().toISOString(), note:String(p.note||'') };
         bookings.push(rec);

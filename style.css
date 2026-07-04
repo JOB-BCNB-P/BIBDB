@@ -619,3 +619,72 @@ textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
 .dd-case { display: flex; align-items: center; gap: 8px; font-size: .88rem; color: var(--ink); padding: 4px 0 2px; flex-wrap: wrap; }
 .dd-empty { font-size: .82rem; color: var(--muted); padding-top: 2px; }
 .muted-row { color: var(--muted); text-align: center; padding: 14px; }
+
+/* =========================================================
+   ส่วนเพิ่มเติม: ปฏิทินเต็มเดือนในแอป / เวลายืดหยุ่น /
+   ปุ่มแบ่งหน้า / modal จ่ายบัญชี BI
+   ========================================================= */
+
+/* ---------- ปฏิทินเต็มเดือน (หน้าในแอป) ---------- */
+.main-cal { margin-top: 14px; }
+.main-cal .mc-cell.big { min-height: 76px; align-items: flex-start; padding: 8px; position: relative; }
+.main-cal .mc-cell.big .mc-d { font-size: .92rem; }
+.main-cal .mc-cell.big .mc-badge { position: absolute; right: 7px; bottom: 7px; }
+.mc-cell.closed { background: repeating-linear-gradient(-45deg, #F5F8F7, #F5F8F7 6px, #EFF4F2 6px, #EFF4F2 12px); }
+.mc-cell.closed .mc-d { color: #B7C2BF; }
+.mc-pend {
+  position: absolute; left: 8px; bottom: 9px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--warn); box-shadow: 0 0 0 2.5px var(--warn-soft);
+}
+.dd-slot.pend { background: var(--warn-soft); }
+
+/* ---------- แผนภาพความว่างรายช่วง 30 นาที ---------- */
+.timeline { display: flex; flex-wrap: wrap; gap: 4px; }
+.tl-step {
+  flex: 1 0 52px; max-width: 76px; text-align: center;
+  background: var(--mint-soft); color: var(--mint-deep);
+  border-radius: 8px; padding: 6px 2px; font-size: .72rem; font-weight: 600;
+}
+.tl-step.part { background: var(--warn-soft); color: var(--warn); }
+.tl-step.full { background: var(--danger-soft); color: var(--danger); }
+.tl-legend { display: flex; align-items: center; gap: 10px; font-size: .78rem; color: var(--muted); margin-top: 8px; }
+.tl-legend .lg { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 4px; vertical-align: -1px; }
+.tl-legend .lg.free { background: var(--mint-soft); }
+.tl-legend .lg.part { background: var(--warn-soft); }
+.tl-legend .lg.full { background: var(--danger-soft); }
+
+.free-ind { display: flex; align-items: center; min-height: 46px; font-weight: 600; font-size: .92rem; }
+.free-ind .ok { color: var(--mint-deep); display: flex; align-items: center; gap: 6px; }
+.free-ind .bad { color: var(--danger); display: flex; align-items: center; gap: 6px; }
+.free-ind svg { width: 18px; height: 18px; }
+
+/* ---------- ปุ่มแบ่งหน้า (pagination) ---------- */
+.pager { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 16px; }
+.pg-btn {
+  min-width: 34px; height: 34px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  color: var(--ink); font-size: .86rem; font-weight: 600; cursor: pointer;
+  transition: background .15s, transform .12s;
+}
+.pg-btn:hover:not(:disabled) { background: var(--mint-soft); transform: translateY(-1px); }
+.pg-btn.active { background: var(--mint-deep); border-color: var(--mint-deep); color: #fff; }
+.pg-btn:disabled { opacity: .4; cursor: default; }
+.pg-dots { color: var(--muted); padding: 0 2px; }
+.pg-info { margin-left: auto; font-size: .8rem; color: var(--muted); }
+
+/* ---------- modal อนุมัติ + จ่ายบัญชี BI ---------- */
+.asn-bk { background: #F6FAF9; border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 12px; font-size: .92rem; }
+.asn-group { margin-bottom: 10px; }
+.asn-head { font-size: .8rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
+.asn-item {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 9px 12px; margin-bottom: 6px; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.asn-item:hover { background: var(--mint-soft); }
+.asn-item:has(input:checked) { background: var(--mint-soft); border-color: var(--mint-deep); }
+.asn-item input { accent-color: var(--mint-deep); width: 16px; height: 16px; }
+.asn-user { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: .92rem; }
+.asn-user svg { width: 16px; height: 16px; color: var(--mint-deep); }

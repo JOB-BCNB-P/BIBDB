@@ -501,7 +501,7 @@ Views.loadSlots = async function(dateISO){
                  oninput="Views.memberSearch(this.value)" onfocus="Views.memberSearch(this.value)" />
           <div id="bkMemberList" class="member-list hidden"></div>
         </div>
-        <div class="help">${isStaff()?'อาจารย์สามารถเลือกนักศึกษาเข้ากลุ่มได้หลายคน':'เลือกได้เฉพาะอาจารย์และนักศึกษาด้วยกันเท่านั้น'}</div>
+        <div class="help">${isStaff()?'อาจารย์สามารถเลือกนักศึกษาเข้ากลุ่มได้หลายคน':'เลือกได้เฉพาะนักศึกษาด้วยกันเท่านั้น'}</div>
       </div>
       <button class="btn btn-primary btn-block" onclick="Views.submitBooking()">${svg(I.check)}ยืนยันการจอง</button>
     </div>` : emptyState('😔','ไม่มีช่วงเวลาว่างในวันนี้','กรุณาเลือกวันอื่น')}
@@ -559,7 +559,7 @@ Views.memberSearch = function(q){
   const list = $('bkMemberList'); if (!list) return;
   q = String(q||'').trim().toLowerCase();
   const pool = (Views._userCache||[]).filter(u=>
-    (u.role==='student' || u.role==='teacher') &&
+    u.role==='student' &&                                    // เลือกได้เฉพาะนักศึกษา
     String(u.user_id)!==String(State.user.user_id) &&
     !Views._members.some(m=>String(m.user_id)===String(u.user_id)) &&
     (!q || u.name.toLowerCase().includes(q) || String(u.class_group||'').toLowerCase().includes(q))
@@ -568,7 +568,7 @@ Views.memberSearch = function(q){
     ? pool.slice(0,8).map(u=>`
         <button type="button" class="member-opt" onclick="Views.addMember('${esc(String(u.user_id))}')">
           <span class="mo-name">${esc(u.name)}</span>
-          <span class="mo-role">${u.role==='teacher' ? 'อาจารย์' : esc(u.class_group||'นักศึกษา')}</span>
+          <span class="mo-role">${esc(u.class_group||'นักศึกษา')}</span>
         </button>`).join('')
     : '<div class="member-empty">ไม่พบรายชื่อที่ค้นหา</div>';
   list.classList.remove('hidden');

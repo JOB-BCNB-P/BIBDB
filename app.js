@@ -1,841 +1,1617 @@
-/*************************************************************
- * Body Interact – ระบบจองเข้าใช้งานโปรแกรม
- * วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ
- * Google Apps Script Web App API (Code.gs)
- *
- * Sheets ที่ต้องมี: Users, Bookings, Settings, Logs, Scenarios, BIAccounts
- *
- * *** อัปเกรดจากเวอร์ชันเดิม: รันฟังก์ชัน upgradeSheets() หนึ่งครั้ง ***
- * จะเพิ่มคอลัมน์ใหม่ให้อัตโนมัติ:
- *   Settings   : open_time, close_time
- *   Bookings   : bi_account
- *   BIAccounts : account_type  (teacher / student)
- *
- * ความปลอดภัยข้อมูล:
- *   - ปิดการแชร์ Google Sheet เป็นสาธารณะได้เลย ระบบดึงข้อมูลผ่าน
- *     Apps Script เท่านั้น (Deploy แบบ Execute as: Me)
- *   - เลขบัตรประชาชนไม่ถูกส่งออกทาง API — นักศึกษาจะถูกแทนด้วย
- *     รหัสสาธารณะ (ST-xxxx) และการจองใหม่บันทึกเฉพาะรหัสสาธารณะ
- *************************************************************/
+/* =========================================================
+   Body Interact – ระบบจองเข้าใช้งาน  (app.js)
+   วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ
+   ========================================================= */
 
-/** เปลี่ยนเป็น Spreadsheet ID ของคุณ หรือปล่อยว่างไว้ถ้า bind กับ Sheet โดยตรง */
-var SPREADSHEET_ID = '10NnLn0q3QNthm-MONcD8dg1DLw6GXIKNQI4VI8v6FlY';
+/* ====== ตั้งค่า ======
+   หลัง deploy Apps Script แล้ว ให้นำ Web App URL มาวางแทนค่าด้านล่าง
+   ถ้ายังเป็นค่า PASTE_YOUR... ระบบจะทำงานในโหมดทดลอง (mock data) ให้อัตโนมัติ */
+const CONFIG = {
+  API_URL: 'https://script.google.com/macros/s/AKfycbxe4Gld_vKsps_aGSOS_lv8rTxjn6zc1BIl9QG05scSWXqjyx_ZbPQFy6Fygf0pq26P/exec'
+};
 
-var SLOT_STEP = 30; // นาทีต่อช่วงเวลา (ความละเอียดของการจอง)
+const MOCK_MODE = !CONFIG.API_URL || CONFIG.API_URL.indexOf('PASTE_YOUR') === 0;
+const PAGE_SIZE = 10;          // จำนวนแถวต่อหน้า (ปุ่มแบ่งหน้า)
+const STEP_MIN = 30;           // ความละเอียดช่วงเวลาจอง (นาที)
 
-function getSS() {
-  return SPREADSHEET_ID
-    ? SpreadsheetApp.openById(SPREADSHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
-}
+/* ---------- helpers วันที่/เวลา ---------- */
+function pad(n){ return String(n).padStart(2,'0'); }
+function toISO(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function todayISO(){ return toISO(new Date()); }
+function parseISO(s){ const p=String(s).split('-'); return new Date(+p[0], +p[1]-1, +p[2]); }
+const DOW_TH = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+const DOW_KEY = ['sun','mon','tue','wed','thu','fri','sat'];
+const MONTH_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const MONTH_TH_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+function fmtThaiDate(iso){ const d=parseISO(iso); return d.getDate()+' '+MONTH_TH[d.getMonth()]+' '+(d.getFullYear()+543); }
+function fmtThaiShort(iso){ const d=parseISO(iso); return DOW_TH[d.getDay()]+' '+d.getDate()+' '+MONTH_TH[d.getMonth()]; }
+function startOfWeek(d){ const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
+function startOfMonth(d){ const x=new Date(d.getFullYear(), d.getMonth(), 1); x.setHours(0,0,0,0); return x; }
+function addMonths(d,n){ return new Date(d.getFullYear(), d.getMonth()+n, 1); }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function t2m(hhmm){ const p=String(hhmm||'').split(':'); return (+p[0]||0)*60+(+p[1]||0); }
+function m2t(min){ return pad(Math.floor(min/60))+':'+pad(min%60); }
+function overlaps(aS,aE,bS,bE){ return aS<bE && bS<aE; }
 
-/* ---------------------------------------------------------
- *  ENTRY POINTS
- * ------------------------------------------------------- */
+/* ---------- icons ---------- */
+const F = ' fill="currentColor" fill-opacity=".18" stroke="none"';
+const D = ' fill="currentColor" stroke="none"';
+const I = {
+  dash:'<rect x="3" y="3" width="8" height="8" rx="2.6"'+F+'/><rect x="13" y="13" width="8" height="8" rx="2.6"'+F+'/>'
+      +'<rect x="3" y="3" width="8" height="8" rx="2.6"/><rect x="13.5" y="3" width="7.5" height="6" rx="2.6"/>'
+      +'<rect x="13" y="13" width="8" height="8" rx="2.6"/><rect x="3" y="15" width="8" height="6" rx="2.6"/>',
+  cal:'<rect x="3" y="5" width="18" height="16" rx="4.5"'+F+'/><rect x="3" y="5" width="18" height="16" rx="4.5"/>'
+      +'<path d="M3.5 10h17"/><path d="M8 3v3.4M16 3v3.4"/><circle cx="12" cy="15.5" r="1.5"'+D+'/>',
+  plus:'<circle cx="12" cy="12" r="9"'+F+'/><circle cx="12" cy="12" r="9"/><path d="M12 8.2v7.6M8.2 12h7.6"/>',
+  list:'<rect x="3" y="4" width="18" height="16" rx="4.5"'+F+'/><rect x="3" y="4" width="18" height="16" rx="4.5"/>'
+      +'<path d="M8 9h9M8 12h9M8 15h6"/><circle cx="5.6" cy="9" r=".95"'+D+'/><circle cx="5.6" cy="12" r=".95"'+D+'/><circle cx="5.6" cy="15" r=".95"'+D+'/>',
+  gear:'<circle cx="12" cy="12" r="3.4"'+F+'/><circle cx="12" cy="12" r="3.4"/>'
+      +'<path d="M12 2.6v3.1M12 18.3v3.1M21.4 12h-3.1M5.7 12H2.6M18.6 5.4l-2.2 2.2M7.6 16.4l-2.2 2.2M18.6 18.6l-2.2-2.2M7.6 7.6 5.4 5.4"/>',
+  report:'<rect x="3" y="3" width="18" height="18" rx="5"'+F+'/><rect x="3" y="3" width="18" height="18" rx="5"/>'
+      +'<path d="M8 16v-3.2M12 16V9.5M16 16v-4.6" stroke-width="2.4"/>',
+  check:'<circle cx="12" cy="12" r="9"'+F+'/><circle cx="12" cy="12" r="9"/><path d="M8 12.4l2.6 2.6L16 9.3"/>',
+  x:'<circle cx="12" cy="12" r="9"'+F+'/><circle cx="12" cy="12" r="9"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',
+  clock:'<circle cx="12" cy="12" r="9"'+F+'/><circle cx="12" cy="12" r="9"/><path d="M12 7.4V12l3.1 1.9"/>',
+  user:'<circle cx="12" cy="8.6" r="4"'+F+'/><circle cx="12" cy="8.6" r="4"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"'+F+'/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/>',
+  pin:'<path d="M12 21c4-4.6 7-7.7 7-11a7 7 0 1 0-14 0c0 3.3 3 6.4 7 11z"'+F+'/><path d="M12 21c4-4.6 7-7.7 7-11a7 7 0 1 0-14 0c0 3.3 3 6.4 7 11z"/><circle cx="12" cy="10" r="2.4"/>',
+  pulse:'<path d="M12 20.3C6.5 16.4 3 13.2 3 9.4 3 6.6 5.1 5 7.3 5c1.8 0 3.4 1 4.7 2.6C13.3 6 14.9 5 16.7 5 18.9 5 21 6.6 21 9.4c0 3.8-3.5 7-9 10.9z"'+F+'/><path d="M3.4 12.1H9l1-1.5 1.8 3.5 2.7-5.6L16 12.1h4.6"/>',
+  book:'<path d="M5 5A3 3 0 0 1 8 2h11v15H8a3 3 0 0 0-3 3z"'+F+'/><path d="M5 5A3 3 0 0 1 8 2h11v17H8a3 3 0 0 0-3 3z"/><path d="M5 19.2A3 3 0 0 1 8 17h11"/>',
+  dl:'<path d="M5 13.5v3A3.5 3.5 0 0 0 8.5 20h7a3.5 3.5 0 0 0 3.5-3.5v-3"'+F+'/><path d="M5 13.5v3A3.5 3.5 0 0 0 8.5 20h7a3.5 3.5 0 0 0 3.5-3.5v-3"/><path d="M12 3.5v9.5M8.3 9.8l3.7 3.7 3.7-3.7"/>',
+  info:'<circle cx="12" cy="12" r="9"'+F+'/><circle cx="12" cy="12" r="9"/><path d="M12 11.2v4.6"/><circle cx="12" cy="7.9" r="1.1"'+D+'/>',
+  heart:'<path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"'+F+'/><path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"/>',
+  cap:'<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"'+F+'/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/>',
+  out:'<path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"'+F+'/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/>',
+  key:'<circle cx="8" cy="14" r="4.2"'+F+'/><circle cx="8" cy="14" r="4.2"/><path d="M11 11 20 2"/><path d="M16.5 5.5 19 8M14.5 7.5 17 10"/>',
+  doc:'<path d="M6 3h7l5 5v13H6z"'+F+'/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
+  ext:'<path d="M5 5h6v2H7v10h10v-4h2v6H5z"'+F+'/><path d="M5 5h6v2H7v10h10v-4h2v6H5z"/><path d="M14 5h5v5M19 5l-7 7"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="2.2"'+F+'/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"'+F+'/><rect x="3" y="3" width="7" height="7" rx="2.2"/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"/>',
+};
+function svg(path, cls){ return '<svg '+(cls?'class="'+cls+'" ':'')+'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+path+'</svg>'; }
 
-function doGet(e) {
-  return handleRequest(e, (e && e.parameter) ? e.parameter : {});
-}
+/* ---------- DOM helpers ---------- */
+const $ = (id)=>document.getElementById(id);
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+/* ---------- role helpers ---------- */
+function isAdmin(){ return State.user && State.user.role==='admin'; }
+function isStaff(){ return State.user && (State.user.role==='teacher' || State.user.role==='admin'); }
 
-function doPost(e) {
-  var body = {};
+/* =========================================================
+   API LAYER
+   ========================================================= */
+async function api(action, params){
+  params = params || {};
+  if (MOCK_MODE) return MockAPI.handle(action, params);
   try {
-    if (e && e.postData && e.postData.contents) {
-      body = JSON.parse(e.postData.contents);
-    }
-  } catch (err) {
-    body = (e && e.parameter) ? e.parameter : {};
-  }
-  return handleRequest(e, body);
-}
-
-function handleRequest(e, p) {
-  var action = p.action || '';
-  try {
-    var result;
-    switch (action) {
-      case 'login':            result = apiLogin(p); break;
-      case 'getSettings':      result = apiGetSettings(); break;
-      case 'getBookings':      result = apiGetBookings(p); break;
-      case 'getAvailability':  result = apiGetAvailability(p); break;
-      case 'createBooking':    result = apiCreateBooking(p); break;
-      case 'cancelBooking':    result = apiCancelBooking(p); break;
-      case 'deleteBooking':    result = apiDeleteBooking(p); break;
-      case 'updateStatus':     result = apiUpdateStatus(p); break;
-      case 'checkIn':          result = apiCheckIn(p); break;
-      case 'updateSettings':   result = apiUpdateSettings(p); break;
-      case 'getUsers':         result = apiGetUsers(p); break;
-      case 'getStats':         result = apiGetStats(p); break;
-      case 'getReport':        result = apiGetReport(p); break;
-      case 'getScenarios':     result = apiGetScenarios(); break;
-      case 'getBIAccounts':    result = apiGetBIAccounts(p); break;
-      case 'addBIAccount':     result = apiAddBIAccount(p); break;
-      case 'requestBIAccount': result = apiRequestBIAccount(p); break;
-      case 'approveBIAccount': result = apiApproveBIAccount(p); break;
-      case 'releaseBIAccount': result = apiReleaseBIAccount(p); break;
-      case 'deleteBIAccount':  result = apiDeleteBIAccount(p); break;
-      case 'ping':             result = { ok: true, time: new Date().toISOString() }; break;
-      default:
-        result = { error: 'ไม่รู้จัก action: "' + action + '"' };
-    }
-    return json(result);
-  } catch (err) {
-    return json({ error: 'เกิดข้อผิดพลาดในเซิร์ฟเวอร์: ' + err.message });
+    const res = await fetch(CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // เลี่ยง CORS preflight
+      body: JSON.stringify(Object.assign({ action }, params)),
+      redirect: 'follow'
+    });
+    const data = await res.json();
+    return data;
+  } catch (e) {
+    return { error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตหรือ URL' };
   }
 }
 
-function json(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+/* =========================================================
+   STATE / SESSION
+   ========================================================= */
+const State = {
+  user: null,
+  settings: null,
+  view: null,
+  loginTab: 'student',
+  bookDate: todayISO(),
+  calMonth: startOfMonth(new Date()),
+  _pages: {},          // สถานะเลขหน้าของแต่ละรายการ
+  _bkCache: {},        // แคชรายการจองที่แสดงอยู่ (ใช้ตอนเปิด modal อนุมัติ)
+};
 
-/* ---------------------------------------------------------
- *  SHEET HELPERS
- * ------------------------------------------------------- */
+const SESSION_KEY = 'bi_session_v1';
+function saveSession(u){ localStorage.setItem(SESSION_KEY, JSON.stringify(u)); }
+function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)); }catch(e){ return null; } }
+function clearSession(){ localStorage.removeItem(SESSION_KEY); }
 
-function sheet(name) {
-  var sh = getSS().getSheetByName(name);
-  if (!sh) throw new Error('ไม่พบชีต "' + name + '" กรุณาสร้างตามคู่มือ');
-  return sh;
-}
+/* =========================================================
+   ปุ่มแบ่งหน้า (Pagination) — ใช้กับทุกรายการที่เกิน 10 แถว
+   ========================================================= */
+function paginate(key, list){
+  const total = list.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  let page = Math.min(State._pages[key] || 1, pages);
+  State._pages[key] = page;
+  const slice = list.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+  if (total <= PAGE_SIZE) return { slice, html:'' };
 
-function readSheet(name) {
-  var sh = sheet(name);
-  var values = sh.getDataRange().getValues();
-  if (values.length < 2) return { headers: values[0] || [], rows: [] };
-  var headers = values[0].map(function (h) { return String(h).trim(); });
-  var rows = [];
-  for (var i = 1; i < values.length; i++) {
-    var obj = { _row: i + 1 };
-    for (var c = 0; c < headers.length; c++) obj[headers[c]] = values[i][c];
-    rows.push(obj);
-  }
-  return { headers: headers, rows: rows };
-}
-
-function appendRow(name, obj) {
-  var sh = sheet(name);
-  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
-    .map(function (h) { return String(h).trim(); });
-  var row = headers.map(function (h) {
-    return (obj[h] !== undefined && obj[h] !== null) ? obj[h] : '';
+  // เลขหน้าแบบย่อ: 1 … ก่อนหน้า ปัจจุบัน ถัดไป … สุดท้าย
+  const nums = new Set([1, pages, page-1, page, page+1]);
+  const shown = [...nums].filter(n=>n>=1 && n<=pages).sort((a,b)=>a-b);
+  let btns = '', prev = 0;
+  shown.forEach(n=>{
+    if (n - prev > 1) btns += '<span class="pg-dots">…</span>';
+    btns += `<button class="pg-btn ${n===page?'active':''}" onclick="App.setPage('${key}',${n})">${n}</button>`;
+    prev = n;
   });
-  sh.appendRow(row);
+  const html = `<div class="pager">
+    <button class="pg-btn" ${page<=1?'disabled':''} onclick="App.setPage('${key}',${page-1})">‹</button>
+    ${btns}
+    <button class="pg-btn" ${page>=pages?'disabled':''} onclick="App.setPage('${key}',${page+1})">›</button>
+    <span class="pg-info">หน้า ${page}/${pages} · ${total} รายการ</span>
+  </div>`;
+  return { slice, html };
 }
 
-function updateRow(name, rowIndex, obj) {
-  var sh = sheet(name);
-  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
-    .map(function (h) { return String(h).trim(); });
-  for (var c = 0; c < headers.length; c++) {
-    if (obj[headers[c]] !== undefined) {
-      sh.getRange(rowIndex, c + 1).setValue(obj[headers[c]]);
+/* =========================================================
+   APP
+   ========================================================= */
+const App = {
+  async boot(){
+    if (MOCK_MODE) showDemoBanner();
+    const u = loadSession();
+    if (u && u.user_id){
+      State.user = u;
+      await App.enterApp();
+    } else {
+      $('loginView').classList.remove('hidden');
+      App.renderLoginCal();
     }
-  }
-}
+  },
 
-function logAction(userId, action) {
-  try {
-    appendRow('Logs', {
-      timestamp: new Date(),
-      user_id: userId || '',
-      action: action || ''
+  setPage(key, p){ State._pages[key] = p; App.go(State.view); },
+
+  loginMonthShift(n){
+    State._loginMonth = addMonths(State._loginMonth || startOfMonth(new Date()), n);
+    App.renderLoginCal();
+  },
+
+  async renderLoginCal(){
+    const grid = $('loginCal'); if (!grid) return;
+    const base = State._loginMonth || (State._loginMonth = startOfMonth(new Date()));
+    $('loginCalLabel').textContent = MONTH_TH_FULL[base.getMonth()] + ' ' + (base.getFullYear()+543);
+
+    const first = startOfWeek(base);
+    const cells = [];
+    for (let i=0;i<42;i++) cells.push(addDays(first, i));
+    const from = toISO(cells[0]), to = toISO(cells[41]);
+
+    grid.innerHTML = '<div class="mc-loading"><div class="spinner"></div></div>';
+    let all = [];
+    try {
+      if (!State._pubSettings){
+        const st = await api('getSettings');
+        State._pubSettings = st.settings || { total_stations:1, open_time:'08:00', close_time:'20:00', open_days:['mon','tue','wed','thu','fri'] };
+      }
+      const bk = await api('getBookings', { from, to });
+      all = (bk.bookings||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
+    } catch(e){ all = []; }
+    State._loginBk = all;
+
+    const dows = ['จ','อ','พ','พฤ','ศ','ส','อา'];
+    let head = dows.map(d=>`<div class="mc-dow">${d}</div>`).join('');
+    let body = '';
+    cells.forEach(d=>{
+      const iso = toISO(d);
+      const inMonth = d.getMonth()===base.getMonth();
+      const isToday = iso===todayISO();
+      const cnt = all.filter(b=>b.date===iso).length;
+      const click = inMonth ? ` onclick="App.loginDayDetail('${iso}')"` : '';
+      body += `<div class="mc-cell ${inMonth?'':'out'} ${isToday?'today':''} ${inMonth?'click':''} ${cnt>0?'has':''}"${click}>
+        <span class="mc-d">${d.getDate()}</span>
+        ${cnt>0?`<span class="mc-badge">${cnt}</span>`:''}
+      </div>`;
     });
-  } catch (e) { /* ไม่ให้ log error ทำให้ระบบหลักล้ม */ }
-}
+    grid.innerHTML = `<div class="mc-grid mc-head">${head}</div><div class="mc-grid mc-body">${body}</div>`;
+  },
 
-function fmtDate(d) {
-  if (d instanceof Date) {
-    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  }
-  return String(d).trim();
-}
+  /* ป็อบอัพรายละเอียดวัน (หน้า login — ไม่แสดงชื่อผู้จอง) */
+  loginDayDetail(iso){
+    const s = State._pubSettings || { total_stations:1 };
+    const day = (State._loginBk||[]).filter(b=>b.date===iso)
+      .sort((a,b)=>a.start_time.localeCompare(b.start_time));
+    const rows = day.length ? day.map(b=>{
+      const st = b.status==='pending'?'<span class="badge pending">รออนุมัติ</span>':'<span class="badge approved">อนุมัติ</span>';
+      return `<div class="dd-slot">
+        <div class="dd-slot-head"><b>${esc(b.start_time)}–${esc(b.end_time)}</b>${st}</div>
+        <div class="dd-case">${esc(b.subject_case||'ไม่ระบุเคส')}</div>
+      </div>`;
+    }).join('') : `<div class="dd-slot"><div class="dd-empty">ยังไม่มีการจองในวันนี้</div></div>`;
+    openModal(`
+      <div class="dd">
+        <div class="dd-date">${svg(I.cal)} การจองวันที่ ${fmtThaiDate(iso)}</div>
+        <div class="dd-list">${rows}</div>
+        <div class="help" style="margin-top:10px">เวลาเปิดจอง ${esc((s.open_time||'08:00'))}–${esc((s.close_time||'20:00'))} · เครื่องทั้งหมด ${s.total_stations||1} เครื่อง</div>
+      </div>`);
+  },
 
-/** แปลงค่าเวลาจากชีต (string หรือ Date) เป็น "HH:MM" */
-function fmtTime(v) {
-  if (v instanceof Date) {
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'HH:mm');
-  }
-  var s = String(v || '').trim();
-  var m = s.match(/^(\d{1,2}):(\d{2})/);
-  if (m) return ('0' + m[1]).slice(-2) + ':' + m[2];
-  return s;
-}
+  switchLoginTab(tab){
+    State.loginTab = tab;
+    ['student','teacher','admin'].forEach(t=>{
+      const seg = $('seg'+t.charAt(0).toUpperCase()+t.slice(1));
+      if (seg) seg.classList.toggle('active', tab===t);
+      const form = $(t+'Form');
+      if (form) form.classList.toggle('hidden', tab!==t);
+    });
+  },
 
-/* เวลาเป็นนาที */
-function t2m(hhmm) {
-  var p = String(hhmm || '').split(':');
-  return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
-}
-function m2t(min) {
-  var h = Math.floor(min / 60), m = min % 60;
-  return ('0' + h).slice(-2) + ':' + ('0' + m).slice(-2);
-}
-function rangesOverlap(aS, aE, bS, bE) { return aS < bE && bS < aE; }
+  async loginStudent(e){
+    e.preventDefault();
+    const cid = $('sCid').value.replace(/\D/g,'');
+    if (cid.length !== 13) return toast('กรุณากรอกเลขบัตรประชาชนให้ครบ 13 หลัก', 'err');
+    const btn = e.target.querySelector('button[type=submit]');
+    setLoading(btn, true);
+    const r = await api('login', { role:'student', national_id: cid });
+    setLoading(btn, false, 'เข้าสู่ระบบ');
+    if (r.error) return toast(r.error, 'err');
+    State.user = r.user; saveSession(r.user);
+    await App.enterApp();
+  },
 
-/* ---------------------------------------------------------
- *  การปกปิดเลขบัตรประชาชน (PDPA)
- *  - นักศึกษาใช้รหัสสาธารณะ "ST-<4ตัวท้าย>-<hash>" แทนเลขบัตรจริง
- *  - API ทุกตัวส่งออกเฉพาะรหัสสาธารณะ ไม่มีเลขบัตรเต็มหลุดออกไป
- * ------------------------------------------------------- */
+  async loginTeacher(e){
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    setLoading(btn, true);
+    const r = await api('login', {
+      role:'teacher',
+      email: $('tEmail').value.trim(),
+      password: $('tPass').value
+    });
+    setLoading(btn, false, 'เข้าสู่ระบบ');
+    if (r.error) return toast(r.error, 'err');
+    State.user = r.user; saveSession(r.user);
+    await App.enterApp();
+  },
 
-function shortHash(s) {
-  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(s), Utilities.Charset.UTF_8);
-  var hex = '';
-  for (var i = 0; i < 3; i++) {
-    var b = (raw[i] + 256) % 256;
-    hex += ('0' + b.toString(16)).slice(-2);
-  }
-  return hex; // 6 ตัวอักษร
-}
+  async loginAdmin(e){
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    setLoading(btn, true);
+    const r = await api('login', { role:'admin', password: $('aPass').value });
+    setLoading(btn, false, 'เข้าสู่ระบบ');
+    if (r.error) return toast(r.error, 'err');
+    State.user = r.user; saveSession(r.user);
+    await App.enterApp();
+  },
 
-/** รหัสสาธารณะของผู้ใช้ (นักศึกษาเท่านั้นที่ถูกแปลง) */
-function pubId(u) {
-  var role = String(u.role || '').trim().toLowerCase();
-  var id = String(u.user_id || '').trim();
-  if (role !== 'student') return id;
-  var digits = id.replace(/\D/g, '');
-  return 'ST-' + digits.slice(-4) + '-' + shortHash(digits);
-}
+  logout(){
+    confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', ()=>{
+      clearSession(); location.reload();
+    });
+  },
 
-/** map: เลขจริงในชีต -> รหัสสาธารณะ (ไว้แปลงข้อมูลจองเก่า) */
-function buildIdMap(users) {
-  var map = {};
-  users.forEach(function (u) { map[String(u.user_id).trim()] = pubId(u); });
-  return map;
-}
+  async enterApp(){
+    $('loginView').classList.add('hidden');
+    $('appView').classList.remove('hidden');
+    const u = State.user;
+    const roleLabel = u.role==='admin' ? 'ผู้ดูแลระบบ'
+                    : u.role==='teacher' ? 'อาจารย์'
+                    : ('นักศึกษา'+(u.class_group?(' · '+u.class_group):''));
+    $('uName').textContent = u.name;
+    $('uRole').textContent = roleLabel;
+    $('uAvatar').textContent = (u.name||'?').trim().charAt(0).toUpperCase();
 
-/** แปลง user_id ในข้อมูลจอง: ถ้าเป็นเลขบัตร 13 หลักเก่า → รหัสสาธารณะ */
-function toPubUid(uid, idmap) {
-  uid = String(uid || '').trim();
-  if (idmap[uid]) return idmap[uid];
-  if (/^\d{13}$/.test(uid)) return 'ST-' + uid.slice(-4) + '-' + shortHash(uid); // เผื่อผู้ใช้ถูกลบไปแล้ว
-  return uid;
-}
+    const s = await api('getSettings');
+    State.settings = s.settings || { total_stations:1, open_days:['mon','tue','wed','thu','fri'], open_time:'08:00', close_time:'20:00', max_duration:2 };
 
-function publicUser(u) {
-  // ไม่คืนค่า password และเลขบัตรประชาชนกลับไปฝั่ง client
-  return {
-    user_id: pubId(u),
-    name: String(u.name),
-    role: String(u.role).toLowerCase(),
-    class_group: String(u.class_group || ''),
-    email: String(u.email || '')
-  };
-}
+    App.renderNav();
+    App.go(isStaff() ? 'tdash' : 'sdash');
+  },
 
-/* ---------------------------------------------------------
- *  AUTH
- * ------------------------------------------------------- */
-
-function apiLogin(p) {
-  var role = (p.role || '').toLowerCase();
-  var users = readSheet('Users').rows;
-
-  // ผู้ดูแลระบบ: เข้าด้วยรหัสผ่านอย่างเดียว
-  if (role === 'admin') {
-    var apass = String(p.password || '');
-    if (!apass) return { error: 'กรุณากรอกรหัสผ่าน' };
-    var a = users.filter(function (u) {
-      return String(u.role).trim().toLowerCase() === 'admin' &&
-             String(u.password || '') === apass;
-    })[0];
-    if (!a) return { error: 'รหัสผ่านผู้ดูแลระบบไม่ถูกต้อง' };
-    logAction(a.user_id, 'login (admin)');
-    return { user: publicUser(a) };
-  }
-
-  // อาจารย์: อีเมล + รหัสผ่าน
-  if (role === 'teacher') {
-    var email = String(p.email || '').trim().toLowerCase();
-    if (!email) return { error: 'กรุณากรอกอีเมล' };
-    var t = users.filter(function (u) {
-      return String(u.email).trim().toLowerCase() === email &&
-             String(u.role).trim().toLowerCase() === 'teacher';
-    })[0];
-    if (!t) return { error: 'ไม่พบอีเมลนี้ในระบบ กรุณาติดต่อผู้ดูแล' };
-    if (String(t.password || '') !== String(p.password || '')) return { error: 'รหัสผ่านไม่ถูกต้อง' };
-    logAction(t.user_id, 'login (teacher)');
-    return { user: publicUser(t) };
-  }
-
-  // นักศึกษา: เลขบัตรประชาชน 13 หลัก (ใช้ตอน login เท่านั้น ไม่ส่งกลับ)
-  if (role === 'student') {
-    var cid = String(p.national_id || p.user_id || '').replace(/\D/g, '');
-    if (cid.length !== 13) return { error: 'เลขบัตรประชาชนต้องมี 13 หลัก' };
-    var s = users.filter(function (u) {
-      return String(u.user_id).replace(/\D/g, '') === cid &&
-             String(u.role).trim().toLowerCase() === 'student';
-    })[0];
-    if (!s) return { error: 'ไม่พบเลขบัตรประชาชนนี้ในระบบ กรุณาติดต่ออาจารย์' };
-    logAction(pubId(s), 'login (student)');
-    return { user: publicUser(s) };
-  }
-
-  return { error: 'ระบุประเภทผู้ใช้ไม่ถูกต้อง' };
-}
-
-/* ---------------------------------------------------------
- *  SETTINGS  (เวลาเปิด-ปิดแบบยืดหยุ่น จองเป็นช่วงละ 30 นาที)
- * ------------------------------------------------------- */
-
-function rawSettings() {
-  var rows = readSheet('Settings').rows;
-  var s = rows[0] || {};
-  return {
-    _row: s._row || 2,
-    total_stations: parseInt(s.total_stations, 10) || 1,
-    open_days: String(s.open_days || 'mon,tue,wed,thu,fri'),
-    open_time: fmtTime(s.open_time) || '08:00',
-    close_time: fmtTime(s.close_time) || '20:00',
-    max_duration: parseInt(s.max_duration, 10) || 2
-  };
-}
-
-function apiGetSettings() {
-  var s = rawSettings();
-  return {
-    settings: {
-      total_stations: s.total_stations,
-      open_days: s.open_days.split(',').map(function (x) { return x.trim(); }).filter(String),
-      open_time: s.open_time || '08:00',
-      close_time: s.close_time || '20:00',
-      slot_step: SLOT_STEP,
-      max_duration: s.max_duration
+  renderNav(){
+    const role = State.user.role;
+    let items;
+    if (role==='admin'){
+      items = [
+        ['tdash', I.dash, 'ภาพรวม'],
+        ['sbook', I.plus, 'จองคิว'],
+        ['tbookings', I.list, 'การจองทั้งหมด'],
+        ['tcal', I.cal, 'ปฏิทิน'],
+        ['tscenarios', I.grid, 'Scenarios'],
+        ['tbi', I.key, 'บัญชี BI'],
+        ['treport', I.report, 'รายงาน'],
+        ['tsettings', I.gear, 'ตั้งค่า'],
+      ];
+    } else if (role==='teacher'){
+      items = [
+        ['tdash', I.dash, 'ภาพรวม'],
+        ['sbook', I.plus, 'จองคิว'],
+        ['tbookings', I.list, 'การจองทั้งหมด'],
+        ['tcal', I.cal, 'ปฏิทิน'],
+        ['tscenarios', I.grid, 'Scenarios'],
+        ['tbi', I.key, 'บัญชี BI'],
+        ['treport', I.report, 'รายงาน'],
+      ];
+    } else {
+      items = [
+        ['sdash', I.dash, 'หน้าหลัก'],
+        ['sbook', I.plus, 'จองคิว'],
+        ['scal', I.cal, 'ปฏิทิน'],
+        ['smine', I.book, 'การจองของฉัน'],
+        ['tbi', I.key, 'บัญชี BI'],
+      ];
     }
-  };
-}
+    $('nav').innerHTML = items.map(([v,ic,label])=>
+      `<button data-v="${v}" onclick="App.go('${v}')">${svg(ic)}${label}</button>`
+    ).join('');
+  },
 
-function apiUpdateSettings(p) {
-  requireAdmin(p); // ตั้งค่าระบบ: ผู้ดูแลเท่านั้น
-  var s = rawSettings();
-  var patch = {};
-  if (p.total_stations !== undefined) patch.total_stations = parseInt(p.total_stations, 10) || 1;
-  if (p.open_days !== undefined)
-    patch.open_days = Array.isArray(p.open_days) ? p.open_days.join(',') : String(p.open_days);
-  if (p.open_time !== undefined)  patch.open_time = fmtTime(p.open_time);
-  if (p.close_time !== undefined) patch.close_time = fmtTime(p.close_time);
-  if (p.max_duration !== undefined) patch.max_duration = parseInt(p.max_duration, 10) || 1;
-  updateRow('Settings', s._row, patch);
-  logAction(p.actor_id, 'updateSettings');
-  return apiGetSettings();
-}
+  go(view){
+    State.view = view;
+    document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.v===view));
+    const m = $('main');
+    m.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด…</div>';
+    const fn = Views[view];
+    if (fn) fn(m); else m.innerHTML = '<div class="empty">ไม่พบหน้านี้</div>';
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+};
 
-/* ---------------------------------------------------------
- *  BOOKINGS
- * ------------------------------------------------------- */
+/* =========================================================
+   VIEWS
+   ========================================================= */
+const Views = {};
 
-function bookingToObj(b, idmap) {
-  return {
-    booking_id: String(b.booking_id),
-    user_id: toPubUid(b.user_id, idmap || {}),
-    name: String(b.name),
-    role: String(b.role),
-    date: fmtDate(b.date),
-    start_time: fmtTime(b.start_time),
-    end_time: fmtTime(b.end_time),
-    station_no: b.station_no === '' ? '' : Number(b.station_no),
-    subject_case: String(b.subject_case || ''),
-    group_size: b.group_size === '' || b.group_size === undefined ? 1 : Number(b.group_size),
-    group_members: String(b.group_members || ''),
-    bi_account: String(b.bi_account || ''),
-    status: String(b.status || 'pending'),
-    checked_in: String(b.checked_in || 'no'),
-    created_at: b.created_at instanceof Date ? b.created_at.toISOString() : String(b.created_at || ''),
-    note: String(b.note || '')
-  };
-}
+/* ---------- นักศึกษา: หน้าหลัก ---------- */
+Views.sdash = async function(m){
+  const [bk, st] = await Promise.all([
+    api('getBookings', { user_id: State.user.user_id }),
+    api('getStats')
+  ]);
+  const mine = (bk.bookings||[]);
+  const upcoming = mine.filter(b=> b.date>=todayISO() && (b.status==='approved'||b.status==='pending'))
+                       .sort((a,b)=> (a.date+a.start_time).localeCompare(b.date+b.start_time));
+  const freeToday = st.free_bi_today||0;
+  const pendingCount = mine.filter(b=>b.status==='pending').length;
 
-function allBookingsPub() {
-  var idmap = buildIdMap(readSheet('Users').rows);
-  return readSheet('Bookings').rows.map(function (b) { return bookingToObj(b, idmap); });
-}
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>สวัสดี ${esc(State.user.name.split(' ')[0])} 👋</h2><span class="hint">ยินดีต้อนรับสู่ระบบจอง Body Interact</span></div>
+      <div class="grid cols-3" style="margin-bottom:18px">
+        ${stat('mint', I.book, upcoming.length, 'คิวที่กำลังจะถึง')}
+        ${stat('warn', I.clock, pendingCount, 'รออนุมัติ')}
+        ${stat('sky', I.pulse, freeToday, 'User ว่างวันนี้')}
+      </div>
 
-function apiGetBookings(p) {
-  var rows = allBookingsPub();
+      <div class="card">
+        <div class="section-head"><h3>คิวของฉันที่กำลังจะถึง</h3><span class="topbar-spacer"></span>
+          <button class="btn btn-primary btn-sm" onclick="App.go('sbook')">${svg(I.plus)}จองเพิ่ม</button></div>
+        ${upcoming.length ? upcoming.slice(0,4).map(b=>bookingCard(b)).join('') : emptyState('🗓️','ยังไม่มีคิวที่จองไว้','กดปุ่ม “จองเพิ่ม” เพื่อเริ่มจองรอบใช้งาน')}
+      </div>
+    </div>`;
+};
 
-  if (p.user_id) rows = rows.filter(function (b) { return b.user_id === String(p.user_id); });
-  if (p.status)  rows = rows.filter(function (b) { return b.status === p.status; });
-  if (p.date)    rows = rows.filter(function (b) { return b.date === fmtDate(p.date); });
-  if (p.from)    rows = rows.filter(function (b) { return b.date >= fmtDate(p.from); });
-  if (p.to)      rows = rows.filter(function (b) { return b.date <= fmtDate(p.to); });
+/* ---------- จองคิว (ทุกบทบาท: นักศึกษา / อาจารย์ / ผู้ดูแล) ----------
+   เวลาแบบยืดหยุ่น: เลือกเวลาเริ่ม–สิ้นสุดเองเป็นช่วงละ 30 นาที */
+Views.sbook = async function(m){
+  const open = State.settings.open_days;
+  const s = State.settings;
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>จองคิวเข้าใช้งาน</h2>
+        <span class="hint">เลือกวันและช่วงเวลาได้อิสระ (ช่วงละ ${STEP_MIN} นาที · สูงสุด ${s.max_duration} ชม.)</span></div>
+      <div class="card">
+        <div class="grid cols-2">
+          <div class="field">
+            <label for="bkDate">วันที่</label>
+            <input class="input" type="date" id="bkDate" min="${todayISO()}" value="${State.bookDate}" onchange="Views.loadSlots(this.value)" />
+            <div class="help">เปิดให้จองเฉพาะวัน: ${open.map(d=>dowLabel(d)).join(', ')} · เวลา ${esc(s.open_time)}–${esc(s.close_time)}</div>
+          </div>
+        </div>
+        <div id="slotArea"></div>
+      </div>
+    </div>`;
+  Views.loadSlots(State.bookDate);
+};
 
-  rows.sort(function (a, b) {
-    return (a.date + a.start_time).localeCompare(b.date + b.start_time);
+Views.loadSlots = async function(dateISO){
+  State.bookDate = dateISO;
+  const area = $('slotArea');
+  area.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังตรวจสอบเครื่องว่าง…</div>';
+
+  const dow = DOW_KEY[parseISO(dateISO).getDay()];
+  if (State.settings.open_days.indexOf(dow)===-1){
+    area.innerHTML = emptyState('🚫','วันนี้ไม่เปิดให้จอง','กรุณาเลือกวันทำการตามที่ระบุด้านบน');
+    return;
+  }
+  const [av, sc, us] = await Promise.all([
+    api('getAvailability', { date: dateISO }),
+    Views._scnCache ? Promise.resolve(Views._scnCache) : api('getScenarios'),
+    Views._userCache ? Promise.resolve(null) : api('getUsers')
+  ]);
+  if (av.error){ area.innerHTML = emptyState('⚠️', av.error, ''); return; }
+  if (sc && sc.scenarios) Views._scnCache = sc;
+  if (us && us.users) Views._userCache = us.users;
+  const scnList = ((Views._scnCache||{}).scenarios)||[];
+  State._avail = av;
+  Views._members = [];
+
+  const scnOptions = scnList.map(s=>{
+    const label = (s.no? s.no+' · ':'') + s.title + (s.level? ' ('+s.level+')':'');
+    const val = (s.no? s.no+' · ':'') + s.title;
+    return `<option value="${esc(val)}">${esc(label)}</option>`;
+  }).join('');
+
+  // แผนภาพความว่างรายช่วง 30 นาที
+  const steps = av.steps||[];
+  const stepChips = steps.map(st=>{
+    const cls = st.free<=0 ? 'full' : (st.used>0 ? 'part' : '');
+    return `<div class="tl-step ${cls}" title="${st.time} · ว่าง ${st.free}/${av.total_stations}"><span>${st.time}</span></div>`;
+  }).join('');
+
+  // ตัวเลือกเวลาเริ่ม: เฉพาะช่วงที่ยังว่าง
+  const startOpts = steps.filter(st=>st.free>0)
+    .map(st=>`<option value="${st.time}">${st.time}</option>`).join('');
+
+  area.innerHTML = `
+    <div class="field"><label>ความว่างของวัน (${fmtThaiDate(dateISO)})</label>
+      <div class="timeline">${stepChips || '<div class="help">ยังไม่ได้ตั้งค่าเวลาเปิด-ปิด</div>'}</div>
+      <div class="tl-legend"><span class="lg free"></span>ว่าง <span class="lg part"></span>ว่างบางเครื่อง <span class="lg full"></span>เต็ม</div>
+    </div>
+    ${startOpts ? `
+    <div class="grid cols-3">
+      <div class="field">
+        <label for="bkStart">เวลาเริ่ม</label>
+        <select class="input" id="bkStart" onchange="Views.updateEnd()">${startOpts}</select>
+      </div>
+      <div class="field">
+        <label for="bkEnd">เวลาสิ้นสุด</label>
+        <select class="input" id="bkEnd" onchange="Views.updateFree()"></select>
+      </div>
+      <div class="field">
+        <label>เครื่องว่างในช่วงที่เลือก</label>
+        <div class="free-ind" id="bkFree">—</div>
+      </div>
+    </div>
+    <div id="bookForm">
+      <div class="grid cols-2">
+        <div class="field">
+          <label for="bkCase">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios)</label>
+          <select class="input" id="bkCase">
+            <option value="">— เลือก Scenario —</option>
+            ${scnOptions}
+          </select>
+        </div>
+        <div class="field">
+          <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
+          <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="bkNote">หมายเหตุเกี่ยวกับ Scenario ที่เลือก (ถ้ามี)</label>
+        <textarea class="input" id="bkNote" rows="2" placeholder="เช่น จุดที่ต้องการเน้นฝึก อุปกรณ์เพิ่มเติม ฯลฯ"></textarea>
+      </div>
+      <div class="field">
+        <label for="bkMemberSearch">${isStaff()?'เลือกนักศึกษาที่เข้าร่วม (เลือกได้หลายคน)':'รายชื่อสมาชิกในกลุ่ม (ถ้ามี)'}</label>
+        <div class="member-picker" id="memberPicker">
+          <div id="bkChips" class="member-chips"></div>
+          <input class="input" id="bkMemberSearch" placeholder="พิมพ์ชื่อเพื่อค้นหา แล้วกดเลือก…" autocomplete="off"
+                 oninput="Views.memberSearch(this.value)" onfocus="Views.memberSearch(this.value)" />
+          <div id="bkMemberList" class="member-list hidden"></div>
+        </div>
+        <div class="help">${isStaff()?'อาจารย์สามารถเลือกนักศึกษาเข้ากลุ่มได้หลายคน':'เลือกได้เฉพาะอาจารย์และนักศึกษาด้วยกันเท่านั้น'}</div>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="Views.submitBooking()">${svg(I.check)}ยืนยันการจอง</button>
+    </div>` : emptyState('😔','ไม่มีช่วงเวลาว่างในวันนี้','กรุณาเลือกวันอื่น')}
+  `;
+  if (startOpts) Views.updateEnd();
+
+  if (!Views._memberDocBound){
+    Views._memberDocBound = true;
+    document.addEventListener('click', (e)=>{
+      const mp = $('memberPicker');
+      const list = $('bkMemberList');
+      if (mp && list && !mp.contains(e.target)) list.classList.add('hidden');
+    });
+  }
+};
+
+/* เมื่อเปลี่ยนเวลาเริ่ม → คำนวณตัวเลือกเวลาสิ้นสุดที่เป็นไปได้ */
+Views.updateEnd = function(){
+  const av = State._avail; if (!av) return;
+  const steps = av.steps||[];
+  const start = $('bkStart').value;
+  const startM = t2m(start);
+  const maxM = Math.min(t2m(av.close_time), startM + (av.max_duration*60));
+  const opts = [];
+  // เดินหน้าทีละช่วง หยุดเมื่อเจอช่วงที่เต็ม
+  for (let m = startM; m < maxM; m += STEP_MIN){
+    const st = steps.find(x=>t2m(x.time)===m);
+    if (!st || st.free<=0) break;
+    opts.push(m + STEP_MIN);
+  }
+  $('bkEnd').innerHTML = opts.map(m=>`<option value="${m2t(m)}">${m2t(m)}</option>`).join('');
+  Views.updateFree();
+};
+
+/* แสดงจำนวนเครื่องว่างต่ำสุดในช่วงที่เลือก */
+Views.updateFree = function(){
+  const av = State._avail; if (!av) return;
+  const el = $('bkFree'); if (!el) return;
+  const start = $('bkStart').value, end = $('bkEnd').value;
+  if (!start || !end){ el.textContent='—'; return; }
+  const sM = t2m(start), eM = t2m(end);
+  let minFree = av.total_stations;
+  (av.steps||[]).forEach(st=>{
+    const m = t2m(st.time);
+    if (m>=sM && m<eM) minFree = Math.min(minFree, st.free);
   });
-  return { bookings: rows };
-}
+  el.innerHTML = minFree>0
+    ? `<span class="ok">${svg(I.check)} ว่าง ${minFree}/${av.total_stations} เครื่อง</span>`
+    : `<span class="bad">${svg(I.x)} เต็ม</span>`;
+};
 
-/** การจองที่ยัง active (pending/approved) ของวันหนึ่ง */
-function activeOfDate(all, date) {
-  return all.filter(function (b) {
-    return b.date === date && (b.status === 'pending' || b.status === 'approved');
+/* ---------- เลือกสมาชิกกลุ่ม (ค้นหาจากรายชื่อผู้ใช้) ---------- */
+Views._members = [];
+Views.memberSearch = function(q){
+  const list = $('bkMemberList'); if (!list) return;
+  q = String(q||'').trim().toLowerCase();
+  const pool = (Views._userCache||[]).filter(u=>
+    (u.role==='student' || u.role==='teacher') &&
+    String(u.user_id)!==String(State.user.user_id) &&
+    !Views._members.some(m=>String(m.user_id)===String(u.user_id)) &&
+    (!q || u.name.toLowerCase().includes(q) || String(u.class_group||'').toLowerCase().includes(q))
+  );
+  list.innerHTML = pool.length
+    ? pool.slice(0,8).map(u=>`
+        <button type="button" class="member-opt" onclick="Views.addMember('${esc(String(u.user_id))}')">
+          <span class="mo-name">${esc(u.name)}</span>
+          <span class="mo-role">${u.role==='teacher' ? 'อาจารย์' : esc(u.class_group||'นักศึกษา')}</span>
+        </button>`).join('')
+    : '<div class="member-empty">ไม่พบรายชื่อที่ค้นหา</div>';
+  list.classList.remove('hidden');
+};
+Views.addMember = function(uid){
+  const u = (Views._userCache||[]).find(x=>String(x.user_id)===String(uid));
+  if (!u) return;
+  Views._members.push({ user_id:u.user_id, name:u.name, role:u.role });
+  const inp = $('bkMemberSearch'); if (inp){ inp.value=''; inp.focus(); }
+  $('bkMemberList').classList.add('hidden');
+  Views.renderMemberChips();
+};
+Views.removeMember = function(uid){
+  Views._members = Views._members.filter(m=>String(m.user_id)!==String(uid));
+  Views.renderMemberChips();
+};
+Views.renderMemberChips = function(){
+  const host = $('bkChips'); if (!host) return;
+  host.innerHTML = Views._members.map(m=>`
+    <span class="member-chip ${m.role}">
+      ${esc(m.name)}
+      <button type="button" onclick="Views.removeMember('${esc(String(m.user_id))}')" aria-label="ลบ ${esc(m.name)}">&times;</button>
+    </span>`).join('');
+  const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
+};
+
+Views.submitBooking = async function(){
+  const start = $('bkStart') && $('bkStart').value;
+  const end = $('bkEnd') && $('bkEnd').value;
+  if (!start || !end) return toast('กรุณาเลือกช่วงเวลา', 'err');
+  if (!$('bkCase').value) return toast('กรุณาเลือก Scenario ที่จะฝึก', 'err');
+  const btn = event.target;
+  setLoading(btn, true);
+  const r = await api('createBooking', {
+    user_id: State.user.user_id, name: State.user.name, role: State.user.role,
+    date: State.bookDate, start_time: start, end_time: end,
+    subject_case: $('bkCase').value,
+    note: $('bkNote').value.trim(),
+    group_size: parseInt($('bkSize').value,10)||1,
+    group_members: Views._members.map(m=>m.name).join(', ')
   });
+  setLoading(btn, false, 'ยืนยันการจอง');
+  if (r.error) return toast(r.error, 'err');
+  toast('จองสำเร็จ! รอผู้ดูแลระบบอนุมัติ', 'ok');
+  App.go(isStaff() ? 'tbookings' : 'smine');
+};
+
+/* ---------- นักศึกษา: การจองของฉัน ---------- */
+Views.smine = async function(m){
+  const bk = await api('getBookings', { user_id: State.user.user_id });
+  const list = (bk.bookings||[]).sort((a,b)=> (b.date+b.start_time).localeCompare(a.date+a.start_time));
+  const pg = paginate('smine', list);
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>การจองของฉัน</h2><span class="hint">ทั้งหมด ${list.length} รายการ</span></div>
+      <div class="card">
+        ${list.length ? pg.slice.map(b=>bookingCard(b, true)).join('') : emptyState('📋','ยังไม่มีประวัติการจอง','ไปที่หน้า “จองคิว” เพื่อเริ่มจอง')}
+        ${pg.html}
+      </div>
+    </div>`;
+};
+
+App.cancelMine = function(id){
+  confirmModal('ยกเลิกการจอง', 'ต้องการยกเลิกการจองนี้ใช่หรือไม่?', 'ยกเลิกการจอง', async ()=>{
+    const r = await api('cancelBooking', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
+    if (r.error) return toast(r.error,'err');
+    toast('ยกเลิกการจองแล้ว','ok'); App.go(State.view);
+  });
+};
+App.checkIn = async function(id){
+  const r = await api('checkIn', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
+  if (r.error) return toast(r.error,'err');
+  toast('เช็คอินเรียบร้อย ✅','ok'); App.go(State.view);
+};
+
+/* ---------- ปฏิทินเต็มเดือน (ใช้ร่วม น.ศ./อาจารย์/ผู้ดูแล)
+     คลิกวันเพื่อดูรายละเอียดเป็นป็อบอัพ ---------- */
+Views.scal = function(m){ renderMonth(m, false); };
+Views.tcal = function(m){ renderMonth(m, true); };
+
+async function renderMonth(m, staff){
+  const base = State.calMonth;
+  const first = startOfWeek(base);
+  const cells = [];
+  for (let i=0;i<42;i++) cells.push(addDays(first, i));
+  const from = toISO(cells[0]), to = toISO(cells[41]);
+
+  const bk = await api('getBookings', { from, to });
+  const all = (bk.bookings||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
+  State._calBk = all;
+  State._calStaff = staff;
+
+  const dows = ['จ','อ','พ','พฤ','ศ','ส','อา'];
+  const head = dows.map(d=>`<div class="mc-dow">${d}</div>`).join('');
+  let body = '';
+  cells.forEach(d=>{
+    const iso = toISO(d);
+    const inMonth = d.getMonth()===base.getMonth();
+    const isToday = iso===todayISO();
+    const dow = DOW_KEY[d.getDay()];
+    const off = State.settings.open_days.indexOf(dow)===-1;
+    const day = all.filter(b=>b.date===iso);
+    const cnt = day.length;
+    const pendingCnt = day.filter(b=>b.status==='pending').length;
+    const click = inMonth ? ` onclick="App.dayDetail('${iso}')"` : '';
+    body += `<div class="mc-cell big ${inMonth?'':'out'} ${isToday?'today':''} ${off&&inMonth?'closed':''} ${inMonth?'click':''} ${cnt>0?'has':''}"${click}>
+      <span class="mc-d">${d.getDate()}</span>
+      ${cnt>0?`<span class="mc-badge">${cnt}</span>`:''}
+      ${pendingCnt>0?`<span class="mc-pend" title="รออนุมัติ ${pendingCnt}"></span>`:''}
+    </div>`;
+  });
+
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>ปฏิทินการใช้งาน</h2><span class="hint">มุมมองเต็มเดือน · คลิกวันเพื่อดูรายละเอียด</span></div>
+      <div class="card">
+        <div class="cal-head">
+          <button class="btn btn-soft btn-sm" onclick="App.monthShift(-1)">${svg('<path d="M15 18l-6-6 6-6"/>')}เดือนก่อน</button>
+          <span class="range">${MONTH_TH_FULL[base.getMonth()]} ${base.getFullYear()+543}</span>
+          <button class="btn btn-soft btn-sm" onclick="App.monthShift(1)">เดือนถัดไป${svg('<path d="M9 18l6-6-6-6"/>')}</button>
+          <span class="topbar-spacer"></span>
+          <button class="btn btn-ghost btn-sm" onclick="App.monthToday()">เดือนนี้</button>
+        </div>
+        <div class="month-cal main-cal">
+          <div class="mc-grid mc-head">${head}</div>
+          <div class="mc-grid mc-body">${body}</div>
+        </div>
+        <div class="cal-note" style="margin-top:12px">${svg(I.info)}<span>ตัวเลขบนวัน = จำนวนการจอง · จุดส้ม = มีรายการรออนุมัติ</span></div>
+      </div>
+    </div>`;
+}
+App.monthShift = function(n){ State.calMonth = addMonths(State.calMonth, n); App.go(State.view); };
+App.monthToday = function(){ State.calMonth = startOfMonth(new Date()); App.go(State.view); };
+
+/* ป็อบอัพรายละเอียดวัน (ในแอป) */
+App.dayDetail = function(iso){
+  const staff = !!State._calStaff;
+  const day = (State._calBk||[]).filter(b=>b.date===iso)
+    .sort((a,b)=>a.start_time.localeCompare(b.start_time));
+  const rows = day.length ? day.map(b=>{
+    const admin = isAdmin();
+    const act = (admin && b.status==='pending')
+      ? `<div class="bc-actions" style="margin-top:6px">
+           <button class="btn btn-primary btn-sm" onclick="App._closeModal();App.approve('${b.booking_id}')">${svg(I.check)}อนุมัติ</button>
+           <button class="btn btn-danger btn-sm" onclick="App._closeModal();App.reject('${b.booking_id}')">${svg(I.x)}ปฏิเสธ</button>
+         </div>` : '';
+    return `<div class="dd-slot ${b.status==='pending'?'pend':''}">
+      <div class="dd-slot-head"><b>${esc(b.start_time)}–${esc(b.end_time)}</b>${statusBadge(b.status)}</div>
+      <div class="dd-case">
+        ${staff?`<b>${esc(b.name)}</b> · `:''}${esc(b.subject_case||'ไม่ระบุเคส')}
+        <span style="color:var(--muted)">· เครื่อง #${b.station_no}${b.group_size>1?' · '+b.group_size+' คน':''}</span>
+      </div>
+      ${b.group_members?`<div class="dd-case" style="color:var(--muted)">กลุ่ม: ${esc(b.group_members)}</div>`:''}
+      ${b.bi_account?`<div class="dd-case">${svg(I.key)} บัญชี BI: <b>${esc(b.bi_account)}</b></div>`:''}
+      ${act}
+    </div>`;
+  }).join('') : `<div class="dd-slot"><div class="dd-empty">ยังไม่มีการจองในวันนี้</div></div>`;
+  openModal(`
+    <div class="dd">
+      <div class="dd-date">${svg(I.cal)} การจองวันที่ ${fmtThaiDate(iso)}</div>
+      <div class="dd-list">${rows}</div>
+      <div class="modal-actions" style="margin-top:12px">
+        <button class="btn btn-primary btn-block" onclick="App._closeModal();State.bookDate='${iso}';App.go('sbook')">${svg(I.plus)}จองวันนี้</button>
+      </div>
+    </div>`);
+};
+
+/* ---------- อาจารย์/ผู้ดูแล: ภาพรวม ---------- */
+Views.tdash = async function(m){
+  const [st, bk] = await Promise.all([ api('getStats'), api('getBookings', { status:'pending' }) ]);
+  const pend = (bk.bookings||[]).sort((a,b)=>(a.date+a.start_time).localeCompare(b.date+b.start_time));
+  cacheBookings(pend);
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>ภาพรวมระบบ</h2><span class="hint">ข้อมูลวันที่ ${fmtThaiDate(st.today||todayISO())}</span></div>
+      <div class="grid cols-4" style="margin-bottom:18px">
+        ${stat('mint', I.book, st.bookings_today||0, 'การจองวันนี้')}
+        ${stat('warn', I.clock, st.pending||0, 'รออนุมัติ')}
+        ${stat('sky', I.pulse, st.free_bi_today||0, 'User ว่างวันนี้')}
+        ${stat('blush', I.report, st.weekly_total||0, 'การใช้งาน 7 วัน')}
+      </div>
+      <div class="card">
+        <div class="section-head"><h3>คำขอที่รออนุมัติ</h3><span class="hint">${pend.length} รายการ${isAdmin()?'':' · อนุมัติโดยผู้ดูแลระบบเท่านั้น'}</span>
+          <span class="topbar-spacer"></span>
+          <button class="btn btn-ghost btn-sm" onclick="App.go('tbookings')">ดูทั้งหมด</button></div>
+        ${pend.length ? pend.slice(0,6).map(b=>teacherBookingCard(b)).join('') : emptyState('✅','ไม่มีคำขอค้างอยู่','การจองทุกรายการได้รับการพิจารณาแล้ว')}
+      </div>
+    </div>`;
+};
+
+/* ---------- อาจารย์/ผู้ดูแล: การจองทั้งหมด ---------- */
+Views.tbookings = async function(m){
+  State._tFilter = State._tFilter || 'all';
+  const bk = await api('getBookings', {});
+  let list = (bk.bookings||[]).sort((a,b)=>(b.date+b.start_time).localeCompare(a.date+a.start_time));
+  const f = State._tFilter;
+  const filtered = f==='all' ? list : list.filter(b=>b.status===f);
+  cacheBookings(filtered);
+  const pg = paginate('tbookings', filtered);
+
+  const filterBtn = (val,label)=>`<button class="btn btn-sm ${State._tFilter===val?'btn-primary':'btn-soft'}" onclick="App.setFilter('${val}')">${label}</button>`;
+
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>การจองทั้งหมด</h2><span class="hint">${filtered.length} รายการ</span>
+        <span class="topbar-spacer"></span>
+        <button class="btn btn-ghost btn-sm" onclick="App.exportCSV()">${svg(I.dl)}Export CSV</button></div>
+      <div class="card">
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">
+          ${filterBtn('all','ทั้งหมด')}${filterBtn('pending','รออนุมัติ')}${filterBtn('approved','อนุมัติแล้ว')}${filterBtn('rejected','ปฏิเสธ')}${filterBtn('cancelled','ยกเลิก')}
+        </div>
+        ${filtered.length ? `
+        <div class="table-wrap"><table>
+          <thead><tr><th>วันที่</th><th>เวลา</th><th>เครื่อง</th><th>ผู้จอง</th><th>เคส</th><th>บัญชี BI</th><th>สถานะ</th><th>เช็คอิน</th><th>จัดการ</th></tr></thead>
+          <tbody>${pg.slice.map(rowBooking).join('')}</tbody>
+        </table></div>${pg.html}` : emptyState('🔍','ไม่พบรายการ','ลองเปลี่ยนตัวกรองด้านบน')}
+      </div>
+    </div>`;
+  State._lastList = list;
+};
+App.setFilter = function(v){ State._tFilter = v; State._pages.tbookings = 1; App.go('tbookings'); };
+
+/* เก็บแคชรายการจองที่กำลังแสดง เพื่อใช้ใน modal อนุมัติ */
+function cacheBookings(list){
+  (list||[]).forEach(b=>{ State._bkCache[b.booking_id] = b; });
 }
 
-/** ความว่างรายช่วง 30 นาที ของวันที่กำหนด */
-function apiGetAvailability(p) {
-  var date = fmtDate(p.date);
-  if (!date) return { error: 'กรุณาระบุวันที่' };
-  var s = apiGetSettings().settings;
-  var day = activeOfDate(allBookingsPub(), date);
-
-  var openM = t2m(s.open_time), closeM = t2m(s.close_time);
-  var steps = [];
-  for (var m = openM; m < closeM; m += SLOT_STEP) {
-    var used = day.filter(function (b) {
-      return rangesOverlap(m, m + SLOT_STEP, t2m(b.start_time), t2m(b.end_time));
-    }).length;
-    steps.push({
-      time: m2t(m),
-      used: used,
-      free: Math.max(0, s.total_stations - used)
-    });
-  }
-  return {
-    date: date,
-    total_stations: s.total_stations,
-    open_time: s.open_time, close_time: s.close_time,
-    slot_step: SLOT_STEP, max_duration: s.max_duration,
-    steps: steps,
-    bookings: day.map(function (b) {
-      return { start_time: b.start_time, end_time: b.end_time, status: b.status, subject_case: b.subject_case, name: b.name };
-    })
+/* ---------- อนุมัติ (ผู้ดูแลระบบเท่านั้น) + จ่ายบัญชี BI ---------- */
+App.approve = async function(id){
+  if (!isAdmin()) return toast('การอนุมัติทำได้โดยผู้ดูแลระบบเท่านั้น','err');
+  const b = State._bkCache[id];
+  const r = await api('getBIAccounts', { role:'admin', user_id:State.user.user_id });
+  const accounts = (r.accounts||[]);
+  const avail = accounts.filter(a=>a.status==='available');
+  const group = (type, label)=>{
+    const items = avail.filter(a=>a.account_type===type);
+    if (!items.length) return '';
+    return `<div class="asn-group"><div class="asn-head">${label}</div>
+      ${items.map(a=>`
+        <label class="asn-item">
+          <input type="checkbox" class="asnck" value="${esc(a.account_id)}" />
+          <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
+        </label>`).join('')}
+    </div>`;
   };
+  const info = b ? `<div class="asn-bk">
+      <b>${esc(b.name)}</b> · ${fmtThaiShort(b.date)} · ${esc(b.start_time)}–${esc(b.end_time)}
+      ${b.group_size>1?`<span class="badge in">${b.group_size} คน</span>`:''}
+      ${b.group_members?`<div class="help">กลุ่ม: ${esc(b.group_members)}</div>`:''}
+    </div>` : '';
+  openModal(`
+    <div class="asn">
+      <h3 style="margin-bottom:6px">อนุมัติการจอง</h3>
+      ${info}
+      <p class="modal-sub" style="margin-bottom:10px">เลือกบัญชี BI (user) ที่จะจ่ายให้ผู้จอง — เลือกได้หลายบัญชีเมื่อกลุ่มมีหลายคน หรือไม่เลือกก็ได้</p>
+      ${avail.length ? (group('teacher','บัญชีอาจารย์') + group('student','บัญชีนักศึกษา')) : '<div class="dd-empty" style="padding:8px 0">ไม่มีบัญชี BI ว่างในขณะนี้</div>'}
+      <div class="modal-actions" style="margin-top:14px">
+        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="App.confirmApprove('${esc(id)}')">${svg(I.check)}อนุมัติ</button>
+      </div>
+    </div>`);
+};
+App.confirmApprove = async function(id){
+  const ids = Array.from(document.querySelectorAll('.asnck')).filter(c=>c.checked).map(c=>c.value);
+  App._closeModal();
+  const r = await api('updateStatus', { booking_id:id, status:'approved', actor_id:State.user.user_id, bi_accounts: ids });
+  if (r.error) return toast(r.error,'err');
+  toast(ids.length?('อนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'อนุมัติแล้ว','ok');
+  App.go(State.view);
+};
+App.reject = function(id){
+  if (!isAdmin()) return toast('การปฏิเสธทำได้โดยผู้ดูแลระบบเท่านั้น','err');
+  confirmModal('ปฏิเสธการจอง','ต้องการปฏิเสธการจองนี้ใช่หรือไม่?','ปฏิเสธ', async ()=>{
+    const r = await api('updateStatus', { booking_id:id, status:'rejected', actor_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('ปฏิเสธแล้ว','ok'); App.go(State.view);
+  });
+};
+App.teacherCancel = function(id){
+  confirmModal('ยกเลิกการจอง','ยืนยันยกเลิกการจองรายการนี้?','ยกเลิก', async ()=>{
+    const r = await api('cancelBooking', { booking_id:id, role:State.user.role, user_id:State.user.user_id, actor_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('ยกเลิกแล้ว','ok'); App.go(State.view);
+  });
+};
+App.adminDelete = function(id){
+  confirmModal('ลบการจองถาวร','ลบรายการจองนี้ออกจากระบบอย่างถาวร? การกระทำนี้ย้อนกลับไม่ได้','ลบถาวร', async ()=>{
+    const r = await api('deleteBooking', { booking_id:id, role:'admin', actor_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('ลบรายการแล้ว','ok'); App.go(State.view);
+  });
+};
+
+/* ---------- อาจารย์/ผู้ดูแล: รายงาน ---------- */
+Views.treport = async function(m){
+  const rp = await api('getReport', {});
+  const users = rp.by_user||[]; const cases = rp.by_case||[];
+  const maxU = Math.max(1, ...users.map(u=>u.count));
+  const maxC = Math.max(1, ...cases.map(c=>c.count));
+  const pgU = paginate('rep_u', users);
+  const pgC = paginate('rep_c', cases);
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>รายงานสรุปการใช้งาน</h2><span class="hint">รวม ${rp.total||0} ครั้ง</span>
+        <span class="topbar-spacer"></span>
+        <button class="btn btn-ghost btn-sm" onclick="App.exportReport()">${svg(I.dl)}Export CSV</button></div>
+      <div class="grid cols-2">
+        <div class="card">
+          <h3 style="margin-bottom:14px">จัดอันดับผู้ใช้งาน</h3>
+          ${users.length ? pgU.slice.map(u=>`
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;font-size:.9rem;margin-bottom:5px">
+                <b>${esc(u.name)}</b><span style="color:var(--muted)">${u.count} ครั้ง</span></div>
+              <div class="report-bar"><span style="width:${Math.round(u.count/maxU*100)}%"></span></div>
+              <div class="help">${u.cases.map(c=>esc(c.case)+' ('+c.count+')').join(' · ')}</div>
+            </div>`).join('') + pgU.html : emptyState('📊','ยังไม่มีข้อมูล','')}
+        </div>
+        <div class="card">
+          <h3 style="margin-bottom:14px">เคส/หัวข้อที่ฝึกบ่อย</h3>
+          ${cases.length ? pgC.slice.map(c=>`
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;font-size:.9rem;margin-bottom:5px">
+                <b>${esc(c.case)}</b><span style="color:var(--muted)">${c.count} ครั้ง</span></div>
+              <div class="report-bar"><span style="width:${Math.round(c.count/maxC*100)}%"></span></div>
+            </div>`).join('') + pgC.html : emptyState('📊','ยังไม่มีข้อมูล','')}
+        </div>
+      </div>
+    </div>`;
+};
+
+/* ---------- ผู้ดูแล: ตั้งค่า (เวลาเปิด-ปิดแบบยืดหยุ่น) ---------- */
+Views.tsettings = async function(m){
+  const s = State.settings;
+  const allDays = [['mon','จันทร์'],['tue','อังคาร'],['wed','พุธ'],['thu','พฤหัสบดี'],['fri','ศุกร์'],['sat','เสาร์'],['sun','อาทิตย์']];
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>ตั้งค่าระบบ</h2><span class="hint">กำหนดเครื่อง เวลาเปิด-ปิด และวันเปิดจอง</span></div>
+      <div class="card" style="max-width:620px">
+        <div class="field">
+          <label for="setStations">จำนวนเครื่อง / license ที่มี</label>
+          <input class="input" type="number" id="setStations" min="1" max="50" value="${s.total_stations}" />
+          <div class="help">จำนวนนักศึกษา/กลุ่มที่ใช้งานพร้อมกันได้ในช่วงเวลาเดียวกัน</div>
+        </div>
+        <div class="grid cols-2">
+          <div class="field">
+            <label for="setOpen">เวลาเปิดให้จอง</label>
+            <input class="input" type="time" id="setOpen" step="1800" value="${esc(s.open_time||'08:00')}" />
+          </div>
+          <div class="field">
+            <label for="setClose">เวลาปิด</label>
+            <input class="input" type="time" id="setClose" step="1800" value="${esc(s.close_time||'20:00')}" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="setMax">ระยะเวลาสูงสุดต่อการจอง (ชั่วโมง)</label>
+          <input class="input" type="number" id="setMax" min="1" max="8" value="${s.max_duration}" />
+          <div class="help">ผู้จองเลือกเวลาเริ่ม–สิ้นสุดเองได้อิสระเป็นช่วงละ ${STEP_MIN} นาที ภายใต้เพดานนี้</div>
+        </div>
+        <div class="field">
+          <label>วันที่เปิดให้จอง</label>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            ${allDays.map(([k,l])=>`
+              <label class="btn btn-sm ${s.open_days.indexOf(k)>=0?'btn-primary':'btn-soft'}" style="cursor:pointer" data-day="${k}">
+                <input type="checkbox" class="sr-only dayck" value="${k}" ${s.open_days.indexOf(k)>=0?'checked':''} onchange="this.closest('label').classList.toggle('btn-primary', this.checked);this.closest('label').classList.toggle('btn-soft', !this.checked)"/>${l}
+              </label>`).join('')}
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="App.saveSettings()">${svg(I.check)}บันทึกการตั้งค่า</button>
+      </div>
+    </div>`;
+};
+App.saveSettings = async function(){
+  const days = Array.from(document.querySelectorAll('.dayck')).filter(c=>c.checked).map(c=>c.value);
+  const open = $('setOpen').value, close = $('setClose').value;
+  if (!days.length) return toast('เลือกวันเปิดจองอย่างน้อย 1 วัน','err');
+  if (!open || !close || t2m(close)<=t2m(open)) return toast('เวลาเปิด-ปิดไม่ถูกต้อง','err');
+  const btn = event.target; setLoading(btn, true);
+  const r = await api('updateSettings', {
+    actor_id: State.user.user_id,
+    total_stations: $('setStations').value,
+    max_duration: $('setMax').value,
+    open_time: open, close_time: close,
+    open_days: days
+  });
+  setLoading(btn, false, 'บันทึกการตั้งค่า');
+  if (r.error) return toast(r.error,'err');
+  State.settings = r.settings;
+  toast('บันทึกการตั้งค่าแล้ว','ok');
+};
+
+/* =========================================================
+   COMPONENTS (HTML builders)
+   ========================================================= */
+function levelBadge(lv){
+  const map = { Basic:'lv-basic', Intermediate:'lv-inter', Advanced:'lv-adv' };
+  const th = { Basic:'พื้นฐาน', Intermediate:'ปานกลาง', Advanced:'ขั้นสูง' };
+  return `<span class="lv ${map[lv]||''}"><span class="lv-bars"><i></i><i></i><i></i></span>${esc(lv)}${th[lv]?` · ${th[lv]}`:''}</span>`;
 }
 
-function apiCreateBooking(p) {
-  var lock = LockService.getScriptLock();
-  lock.waitLock(20000); // กันจองชนกัน (race condition)
-  try {
-    var s = apiGetSettings().settings;
-    var date = fmtDate(p.date);
-    var start = fmtTime(p.start_time);
-    var end = fmtTime(p.end_time);
-    if (!date || !start || !end) return { error: 'กรุณาเลือกวันและช่วงเวลา' };
+/* ---------- อาจารย์/ผู้ดูแล: Scenarios ---------- */
+Views.tscenarios = async function(m){
+  const r = await api('getScenarios');
+  const all = r.scenarios || [];
+  State._scn = all;
+  const lv = State._scnLv || 'all';
+  const q = (State._scnQ || '').toLowerCase();
+  let list = all;
+  if (lv!=='all') list = list.filter(s=>s.level===lv);
+  if (q) list = list.filter(s=> (s.title+' '+s.no+' '+s.room).toLowerCase().includes(q));
+  const pg = paginate('scn', list);
 
-    var startM = t2m(start), endM = t2m(end);
-    var openM = t2m(s.open_time), closeM = t2m(s.close_time);
-    if (startM % SLOT_STEP !== 0 || endM % SLOT_STEP !== 0)
-      return { error: 'เวลาต้องลงตัวเป็นช่วงละ ' + SLOT_STEP + ' นาที' };
-    if (endM <= startM) return { error: 'เวลาสิ้นสุดต้องหลังเวลาเริ่ม' };
-    if (startM < openM || endM > closeM)
-      return { error: 'จองได้ระหว่าง ' + s.open_time + ' – ' + s.close_time + ' เท่านั้น' };
-    if (endM - startM > s.max_duration * 60)
-      return { error: 'จองได้ไม่เกิน ' + s.max_duration + ' ชั่วโมงต่อครั้ง' };
+  const chip = (val,label)=>`<button class="chip ${lv===val?'active':''}" onclick="Views.scnFilter('${val}')">${label}</button>`;
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>Scenarios สำหรับฝึก</h2><span class="hint">${all.length} เคส · คลิกเพื่อดูรายละเอียด</span></div>
+      <div class="card">
+        <div class="scn-tools">
+          <input class="input" placeholder="ค้นหาเคส / หมายเลข / ห้อง…" value="${esc(State._scnQ||'')}" oninput="Views.scnSearch(this.value)" />
+          <div class="chips">${chip('all','ทั้งหมด')}${chip('Basic','พื้นฐาน')}${chip('Intermediate','ปานกลาง')}${chip('Advanced','ขั้นสูง')}</div>
+        </div>
+        <div class="scn-list">
+          ${list.length ? pg.slice.map(scnRow).join('') : emptyState('🔍','ไม่พบเคสที่ค้นหา','ลองเปลี่ยนคำค้นหรือตัวกรอง')}
+        </div>
+        ${pg.html}
+      </div>
+    </div>`;
+};
+Views.scnFilter = function(v){ State._scnLv = v; State._pages.scn = 1; App.go('tscenarios'); };
+Views.scnSearch = function(v){ State._scnQ = v; State._pages.scn = 1; clearTimeout(Views._scnT); Views._scnT = setTimeout(()=>App.go('tscenarios'), 250); };
+function scnRow(s){
+  return `<div class="scn-item" onclick="Views.scnDetail('${esc(s.no)}')">
+    <div class="scn-no">#${esc(s.no)}</div>
+    <div class="scn-main">
+      <div class="scn-title">${esc(s.title)}</div>
+      <div class="scn-meta"><span>${esc(s.room)}</span> · ${levelBadge(s.level)}</div>
+    </div>
+    <button class="btn btn-soft btn-sm scn-pdf" onclick="event.stopPropagation();Views.scnPdf('${esc(s.no)}')">${svg(I.doc)}PDF</button>
+  </div>`;
+}
+Views.scnDetail = function(no){
+  const s = (State._scn||[]).find(x=>String(x.no)===String(no)); if(!s) return;
+  openModal(`
+    <div class="scn-modal">
+      <div class="scn-modal-no">#${esc(s.no)}</div>
+      <h3 style="margin:6px 0 10px">${esc(s.title)}</h3>
+      <div class="kv"><span>ห้อง/สถานการณ์</span><b>${esc(s.room)}</b></div>
+      <div class="kv"><span>ระดับความยาก</span><b>${levelBadge(s.level)}</b></div>
+      <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="Views.scnPdf('${esc(s.no)}')">${svg(I.doc)}เปิดไฟล์ PDF รายละเอียด</button>
+    </div>`);
+};
+Views.scnPdf = function(no){
+  const s = (State._scn||[]).find(x=>String(x.no)===String(no)); if(!s) return;
+  if (s.pdf){ window.open(s.pdf, '_blank', 'noopener'); }
+  else { toast('ยังไม่ได้แนบไฟล์ PDF สำหรับเคสนี้ (ผู้ดูแลเพิ่มได้ในชีต Scenarios)', 'err'); }
+};
 
-    var all = allBookingsPub();
-    var day = activeOfDate(all, date);
+/* ---------- บัญชีเข้าใช้ Body Interact (ทุกบทบาท)
+     แยกประเภทบัญชีชัดเจน: อาจารย์ / นักศึกษา ---------- */
+Views.tbi = async function(m){
+  const r = await api('getBIAccounts', { role:State.user.role, user_id:State.user.user_id });
+  const list = r.accounts || [];
+  const admin = isAdmin();
+  const typeBadge = t => `<span class="badge ${t==='teacher'?'in':'approved'}">${t==='teacher'?'อาจารย์':'นักศึกษา'}</span>`;
 
-    // กันจองซ้อนของผู้ใช้คนเดิม
-    var dup = day.filter(function (b) {
-      return b.user_id === String(p.user_id) &&
-             rangesOverlap(startM, endM, t2m(b.start_time), t2m(b.end_time));
+  let listHtml;
+  if (admin){
+    // ผู้ดูแล: เห็นทุกบัญชี แยกเป็น 2 กลุ่มชัดเจน
+    const tList = list.filter(a=>a.account_type==='teacher');
+    const sList = list.filter(a=>a.account_type==='student');
+    const pgT = paginate('bi_t', tList);
+    const pgS = paginate('bi_s', sList);
+    listHtml = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="section-head"><h3>${svg(I.user)} บัญชีสำหรับอาจารย์</h3><span class="hint">${tList.length} บัญชี</span></div>
+        <div class="bi-list">${tList.length ? pgT.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีอาจารย์','')}</div>
+        ${pgT.html}
+      </div>
+      <div class="card">
+        <div class="section-head"><h3>${svg(I.cap)} บัญชีสำหรับนักศึกษา</h3><span class="hint">${sList.length} บัญชี</span></div>
+        <div class="bi-list">${sList.length ? pgS.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีนักศึกษา','')}</div>
+        ${pgS.html}
+      </div>`;
+  } else {
+    const pg = paginate('bi_my', list);
+    listHtml = `
+      <div class="card">
+        <div class="bi-list">${list.length ? pg.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีสำหรับกลุ่มของคุณ','รอผู้ดูแลเพิ่มบัญชี')}</div>
+        ${pg.html}
+      </div>`;
+  }
+
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>บัญชีเข้าใช้ Body Interact</h2>
+        <span class="hint">${admin
+          ? 'เพิ่มบัญชี · อนุมัติคำขอ · ดูรหัสผ่านได้ทุกบัญชี'
+          : (State.user.role==='teacher'
+              ? 'บัญชีกลุ่มอาจารย์ · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ'
+              : 'บัญชีกลุ่มนักศึกษา · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ')}</span></div>
+
+      ${admin ? `<div class="card" style="margin-bottom:16px">
+        <h3 style="margin-bottom:12px">เพิ่มบัญชีใหม่</h3>
+        <div class="grid cols-3">
+          <div class="field"><label for="biUser">Username (BI)</label><input class="input" id="biUser" placeholder="เช่น bcnb-bi-05" /></div>
+          <div class="field"><label for="biPass">Password</label><input class="input" id="biPass" placeholder="รหัสผ่านของบัญชีนี้" /></div>
+          <div class="field"><label for="biType">ประเภทบัญชี</label>
+            <select class="input" id="biType">
+              <option value="teacher">สำหรับอาจารย์</option>
+              <option value="student">สำหรับนักศึกษา</option>
+            </select></div>
+        </div>
+        <button class="btn btn-primary" onclick="Views.biAdd()">${svg(I.plus)}เพิ่มบัญชี</button>
+      </div>` : `<div class="login-note" style="margin:0 0 16px">${svg(I.info)}<span>เลือก “ขอใช้งาน” บัญชีที่ว่าง เมื่อผู้ดูแลระบบอนุมัติแล้ว ระบบจะแสดงรหัสผ่านให้เฉพาะคุณ</span></div>`}
+
+      ${listHtml}
+    </div>`;
+};
+function biCard(a, admin, typeBadge){
+  const mine = a.holder_id===State.user.user_id;
+  let right = '';
+  if (admin){
+    right = `${a.status==='pending'?`<button class="btn btn-primary btn-sm" onclick="Views.biApprove('${a.account_id}')">${svg(I.check)}อนุมัติ</button>`:''}
+      ${a.status!=='available'?`<button class="btn btn-warn btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`:''}
+      <button class="btn btn-danger btn-sm" onclick="Views.biDelete('${a.account_id}')">${svg(I.x)}ลบ</button>`;
+  } else {
+    if (a.status==='available') right = `<button class="btn btn-primary btn-sm" onclick="Views.biRequest('${a.account_id}')">${svg(I.key)}ขอใช้งาน</button>`;
+    else if (a.status==='pending' && mine) right = `<span class="badge pending">รออนุมัติ</span>`;
+    else if (a.status==='approved' && mine) right = `<button class="btn btn-soft btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`;
+    else right = `<span class="badge" style="background:#EEF1F0;color:#8A9794">ไม่ว่าง</span>`;
+  }
+  const pwRow = (a.password!==undefined)
+    ? `<div class="bi-pass">${svg(I.key)}<span>รหัสผ่าน:</span><code>${esc(a.password)}</code></div>`
+    : (a.status==='approved' && mine ? '' : `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>`);
+  const who = a.holder_name ? `<span class="bi-holder">${a.status==='approved'?'ผู้ใช้:':'ผู้ขอ:'} ${esc(a.holder_name)}</span>` : '';
+  return `<div class="bi-item">
+    <div class="bi-main">
+      <div class="bi-user">${svg(I.user)}<b>${esc(a.username)}</b> ${typeBadge?typeBadge(a.account_type):''} ${biStatusBadge(a.status)}</div>
+      ${who}
+      ${(admin || (a.status==='approved'&&mine)) ? pwRow : (a.status==='pending'&&mine ? `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>` : '')}
+    </div>
+    <div class="bi-actions">${right}</div>
+  </div>`;
+}
+function biStatusBadge(s){
+  const map = { available:['ว่าง','approved'], pending:['รออนุมัติ','pending'], approved:['ใช้งานอยู่','in'] };
+  const v = map[s]||[s,'']; return `<span class="badge ${v[1]}">${v[0]}</span>`;
+}
+Views.biAdd = async function(){
+  const username = $('biUser').value.trim(), password = $('biPass').value.trim();
+  const account_type = $('biType') ? $('biType').value : 'teacher';
+  if (!username || !password) return toast('กรอก username และ password','err');
+  const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password, account_type });
+  if (r.error) return toast(r.error,'err'); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
+};
+Views.biRequest = async function(id){
+  const r = await api('requestBIAccount', { account_id:id, user_id:State.user.user_id, name:State.user.name, role:State.user.role });
+  if (r.error) return toast(r.error,'err'); toast('ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ','ok'); App.go('tbi');
+};
+Views.biApprove = async function(id){
+  const r = await api('approveBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
+  if (r.error) return toast(r.error,'err'); toast('อนุมัติแล้ว','ok'); App.go('tbi');
+};
+Views.biRelease = function(id){
+  confirmModal('คืนบัญชี','ปล่อยบัญชีนี้กลับเป็นสถานะว่าง?','คืนบัญชี', async ()=>{
+    const r = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('คืนบัญชีแล้ว','ok'); App.go('tbi');
+  });
+};
+Views.biDelete = function(id){
+  confirmModal('ลบบัญชี','ลบบัญชี BI นี้ถาวร?','ลบ', async ()=>{
+    const r = await api('deleteBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err'); toast('ลบบัญชีแล้ว','ok'); App.go('tbi');
+  });
+};
+
+/* =========================================================
+   COMPONENTS (HTML builders) — เดิม
+   ========================================================= */
+function stat(color, icon, num, label){
+  return `<div class="stat ${color}"><div class="ico">${svg(icon)}</div><div><div class="num">${num}</div><div class="lab">${label}</div></div></div>`;
+}
+function statusBadge(s){
+  const map = {pending:'รออนุมัติ', approved:'อนุมัติแล้ว', rejected:'ปฏิเสธ', cancelled:'ยกเลิก'};
+  return `<span class="badge ${s}">${map[s]||s}</span>`;
+}
+function dowLabel(k){ return {mon:'จันทร์',tue:'อังคาร',wed:'พุธ',thu:'พฤหัสบดี',fri:'ศุกร์',sat:'เสาร์',sun:'อาทิตย์'}[k]||k; }
+
+function bookingCard(b, withActions){
+  const today = todayISO();
+  let actions = '';
+  if (withActions){
+    const can = [];
+    if (b.status==='pending' || b.status==='approved')
+      can.push(`<button class="btn btn-danger btn-sm" onclick="App.cancelMine('${b.booking_id}')">${svg(I.x)}ยกเลิก</button>`);
+    if (b.status==='approved' && b.checked_in!=='yes' && b.date===today)
+      can.push(`<button class="btn btn-sky btn-sm" onclick="App.checkIn('${b.booking_id}')">${svg(I.check)}เช็คอิน</button>`);
+    if (b.checked_in==='yes')
+      can.push(`<span class="badge in">${svg(I.check)} เช็คอินแล้ว</span>`);
+    if (can.length) actions = `<div class="bc-actions">${can.join('')}</div>`;
+  }
+  return `<div class="booking-card">
+    <div class="bc-top">
+      <div>
+        <div class="bc-title">${fmtThaiShort(b.date)} · ${esc(b.start_time)}–${esc(b.end_time)}</div>
+        <div class="meta">
+          <span>เครื่อง <b>#${b.station_no}</b></span>
+          ${b.group_size?`<span>${esc(String(b.group_size))} คน</span>`:''}
+          ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
+          ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
+          ${b.bi_account?`<span>บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
+          ${b.note?`<span>หมายเหตุ: ${esc(b.note)}</span>`:''}
+        </div>
+      </div>
+      ${statusBadge(b.status)}
+    </div>
+    ${actions}
+  </div>`;
+}
+
+function teacherBookingCard(b){
+  const admin = isAdmin();
+  return `<div class="booking-card">
+    <div class="bc-top">
+      <div>
+        <div class="bc-title">${esc(b.name)} <span style="color:var(--muted);font-weight:400;font-size:.85rem">(${esc(b.user_id)})</span></div>
+        <div class="meta">
+          <span><b>${fmtThaiShort(b.date)}</b> · ${esc(b.start_time)}–${esc(b.end_time)}</span>
+          <span>เครื่อง <b>#${b.station_no}</b></span>
+          ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
+          ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
+          ${b.bi_account?`<span>บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
+        </div>
+      </div>
+      ${statusBadge(b.status)}
+    </div>
+    <div class="bc-actions">
+      ${admin && b.status==='pending' ? `<button class="btn btn-primary btn-sm" onclick="App.approve('${b.booking_id}')">${svg(I.check)}อนุมัติ</button>
+      <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}ปฏิเสธ</button>` : ''}
+      ${!admin && b.status==='pending' ? `<span class="help">รอผู้ดูแลระบบอนุมัติ</span>` : ''}
+      ${b.status==='approved' ? `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>` : ''}
+      ${admin ? `<button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')">${svg(I.x)}ลบถาวร</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function rowBooking(b){
+  const admin = isAdmin();
+  let act = '';
+  if (b.status==='pending'){
+    act = admin
+      ? `<button class="btn btn-primary btn-sm" onclick="App.approve('${b.booking_id}')">${svg(I.check)}</button>
+         <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}</button>`
+      : '<span style="color:var(--muted)">รอผู้ดูแล</span>';
+  } else if (b.status==='approved'){
+    act = `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
+  } else { act = '<span style="color:var(--muted)">—</span>'; }
+  if (admin)
+    act += ` <button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')" title="ลบถาวร">${svg(I.x)}</button>`;
+  return `<tr>
+    <td>${fmtThaiShort(b.date)}</td>
+    <td>${esc(b.start_time)}–${esc(b.end_time)}</td>
+    <td>#${b.station_no}</td>
+    <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
+    <td>${esc(b.subject_case||'—')}</td>
+    <td>${b.bi_account?esc(b.bi_account):'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${statusBadge(b.status)}</td>
+    <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
+    <td><div class="row-actions">${act}</div></td>
+  </tr>`;
+}
+
+function emptyState(emo, title, sub){
+  return `<div class="empty"><div class="emo">${emo}</div><h3 style="margin-bottom:4px">${esc(title)}</h3>${sub?`<p>${esc(sub)}</p>`:''}</div>`;
+}
+
+/* =========================================================
+   EXPORT CSV
+   ========================================================= */
+function downloadCSV(filename, rows){
+  const csv = rows.map(r=>r.map(c=>{
+    const s = String(c==null?'':c);
+    return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }).join(',')).join('\n');
+  const blob = new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+App.exportCSV = async function(){
+  const bk = await api('getBookings', {});
+  const list = bk.bookings||[];
+  const rows = [['วันที่','เวลาเริ่ม','เวลาจบ','เครื่อง','รหัสผู้จอง','ชื่อ','เคส','จำนวนคน','สมาชิกกลุ่ม','บัญชี BI','สถานะ','เช็คอิน']];
+  list.forEach(b=>rows.push([b.date,b.start_time,b.end_time,b.station_no,b.user_id,b.name,b.subject_case,b.group_size||1,b.group_members,b.bi_account||'',b.status,b.checked_in]));
+  downloadCSV('bookings_'+todayISO()+'.csv', rows);
+  toast('ดาวน์โหลดไฟล์แล้ว','ok');
+};
+App.exportReport = async function(){
+  const rp = await api('getReport', {});
+  const rows = [['รหัส','ชื่อ','จำนวนครั้ง','เคสที่ฝึก']];
+  (rp.by_user||[]).forEach(u=>rows.push([u.user_id,u.name,u.count,u.cases.map(c=>c.case+'('+c.count+')').join(' / ')]));
+  downloadCSV('report_'+todayISO()+'.csv', rows);
+  toast('ดาวน์โหลดรายงานแล้ว','ok');
+};
+
+/* =========================================================
+   UI: toast / modal / loading
+   ========================================================= */
+function toast(msg, type){
+  const host = $('toastHost');
+  const el = document.createElement('div');
+  el.className = 'toast '+(type||'');
+  const ic = type==='ok'?I.check : type==='err'?I.info : I.info;
+  el.innerHTML = svg(ic)+'<span>'+esc(msg)+'</span>';
+  host.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(10px)'; setTimeout(()=>el.remove(),300); }, 3000);
+}
+function confirmModal(title, sub, okLabel, onOk){
+  const host = $('modalHost');
+  host.innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal">
+      <h3>${esc(title)}</h3><p class="modal-sub">${esc(sub)}</p>
+      <div class="modal-actions">
+        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
+        <button class="btn btn-primary" id="modalOk">${esc(okLabel)}</button>
+      </div>
+    </div></div>`;
+  $('modalOk').onclick = ()=>{ App._closeModal(); onOk(); };
+}
+App._closeModal = function(){ $('modalHost').innerHTML=''; };
+
+/* modal เนื้อหาอิสระ (เช่น รายละเอียดวัน / scenario / จ่ายบัญชี BI) */
+function openModal(html, wide){
+  const host = $('modalHost');
+  host.innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal ${wide?'modal-wide':''}">
+      ${html}
+      <div class="modal-actions" style="margin-top:18px">
+        <button class="btn btn-soft btn-block" onclick="App._closeModal()">ปิด</button>
+      </div>
+    </div></div>`;
+}
+
+function setLoading(btn, on, restore){
+  if (!btn) return;
+  if (on){ btn.dataset._t = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>'; }
+  else { btn.disabled = false; btn.innerHTML = btn.dataset._t || restore || 'ตกลง'; }
+}
+
+function showDemoBanner(){
+  const b = document.createElement('div');
+  b.className = 'demo-banner';
+  b.innerHTML = svg(I.info)+'<span><b>โหมดทดลอง (Demo)</b> — กำลังใช้ข้อมูลตัวอย่างในเครื่อง ยังไม่ได้เชื่อม Google Sheets · ตั้งค่า <code>CONFIG.API_URL</code> ใน app.js เพื่อใช้งานจริง</span>';
+  document.body.prepend(b);
+}
+
+/* =========================================================
+   MOCK BACKEND (โหมดทดลอง — จำลอง Apps Script + Google Sheets)
+   ใช้เมื่อยังไม่ได้ตั้งค่า CONFIG.API_URL
+   ========================================================= */
+const MockAPI = (function(){
+  const wk = startOfWeek(new Date());
+  const d = (off)=>toISO(addDays(wk, off));
+
+  // นักศึกษา: user_id เป็นรหัสสาธารณะ (ไม่ใช่เลขบัตร) · cid ใช้ login เท่านั้น
+  const users = [
+    { user_id:'t001', name:'อ.ดร. ปวีณา ใจดี', role:'teacher', class_group:'', email:'paweena@bcnbangkok.ac.th', password:'teacher123' },
+    { user_id:'t002', name:'อ. สมหญิง รักเรียน', role:'teacher', class_group:'', email:'somying@bcnbangkok.ac.th', password:'teacher123' },
+    { user_id:'a001', name:'ผู้ดูแลระบบ', role:'admin', class_group:'', email:'admin@bcnbangkok.ac.th', password:'admin123' },
+    { user_id:'ST-4567-a1b2c3', cid:'1100701234567', name:'กานต์ พยาบาลดี', role:'student', class_group:'พย.2/1', email:'', password:'' },
+    { user_id:'ST-5678-d4e5f6', cid:'1100702345678', name:'นภา ศรีสุข', role:'student', class_group:'พย.2/1', email:'', password:'' },
+    { user_id:'ST-6789-g7h8i9', cid:'1100703456789', name:'ธีรเดช มั่นคง', role:'student', class_group:'พย.2/2', email:'', password:'' },
+    { user_id:'ST-7890-j1k2l3', cid:'1100704567890', name:'พิมพ์ชนก ใจงาม', role:'student', class_group:'พย.2/2', email:'', password:'' },
+  ];
+
+  let settings = {
+    total_stations: 4,
+    open_days: ['mon','tue','wed','thu','fri'],
+    open_time: '08:00',
+    close_time: '20:00',
+    slot_step: STEP_MIN,
+    max_duration: 2
+  };
+
+  let seq = 1;
+  const mk = (uid, name, dateOff, start, end, station, cas, status, ci)=>{
+    return { booking_id:'BK'+(1000+seq++), user_id:uid, name, role:'student', date:d(dateOff),
+      start_time:start, end_time:end, station_no:station, subject_case:cas, group_size:1, group_members:'',
+      bi_account:'', status, checked_in:ci?'yes':'no', created_at:new Date().toISOString(), note:'' };
+  };
+  let bookings = [
+    mk('ST-4567-a1b2c3','กานต์ พยาบาลดี', 0, '09:00','10:30', 1, 'ภาวะช็อก (Shock)', 'approved', true),
+    mk('ST-5678-d4e5f6','นภา ศรีสุข',       0, '09:00','10:00', 2, 'ACS', 'approved', false),
+    mk('ST-6789-g7h8i9','ธีรเดช มั่นคง',     0, '10:30','12:00', 1, 'Sepsis', 'pending', false),
+    mk('ST-7890-j1k2l3','พิมพ์ชนก ใจงาม',   1, '13:00','14:30', 1, 'ภาวะหายใจล้มเหลว', 'pending', false),
+    mk('ST-4567-a1b2c3','กานต์ พยาบาลดี', 1, '14:30','16:00', 1, 'DKA', 'approved', false),
+    mk('ST-5678-d4e5f6','นภา ศรีสุข',       2, '09:00','10:00', 1, 'Stroke', 'approved', false),
+    mk('ST-6789-g7h8i9','ธีรเดช มั่นคง',     -2,'10:00','11:00', 2, 'ACS', 'approved', true),
+    mk('ST-7890-j1k2l3','พิมพ์ชนก ใจงาม',   -1,'11:00','12:00', 1, 'Sepsis', 'approved', true),
+  ];
+
+  // ===== Scenarios (จากแคตตาล็อก Body Interact) =====
+  let scenarios = [
+    { no:'115', title:'Pre-eclampsia seizure at 29 Weeks in Primigravid', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'238', title:'Acute pyelonephritis', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'297', title:'Umbilical cord prolapse', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'315', title:'Preterm labour', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'316', title:'First stage labor at home', room:'Living Room', level:'Basic', pdf:'' },
+    { no:'350', title:'Postpartum hemorrhage', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'370', title:'Anaphylaxis reaction after propofol administration', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'408', title:'Pyelonephritis with lower back pain and fever', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'454', title:'Multiple Fractures, Dyspnea, and Chest Pain After Fall', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'471', title:'Traumatic brain injury with head wound', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'474', title:'Anxiety crisis', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'499', title:'COPD exacerbation with shortness of breath', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'536', title:'Asthma exacerbation', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'590', title:'Schizophrenia with agitation', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'594', title:'Acute appendicitis with perforation', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'599', title:'Urinary tract infection and fever', room:'Emergency Room', level:'Basic', pdf:'' },
+    { no:'600', title:'Viral gastroenteritis and dehydration', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'691', title:'Child with pneumonia', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'701', title:'Diabetic ketoacidosis with vomiting, and hypovolemic shock', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'832', title:'Anaphylactic shock due to food allergy', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'881', title:'Preparing for discharge with family education', room:'Inpatient Room', level:'Basic', pdf:'' },
+    { no:'899', title:'Sepsis due to pneumonia', room:'Emergency Room', level:'Advanced', pdf:'' },
+    { no:'940', title:'Alcohol use disorder', room:'Consultation', level:'Intermediate', pdf:'' },
+    { no:'942', title:'Adolescent suicide risk', room:'Consultation', level:'Basic', pdf:'' },
+    { no:'963', title:'Cardiac arrest after angioplasty', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'1009', title:'Smoking cessation in consultation', room:'Consultation', level:'Intermediate', pdf:'' },
+    { no:'1024', title:'Triage of Chest Pain in Emergency Department #3', room:'Emergency Room', level:'Intermediate', pdf:'' },
+    { no:'1276', title:'Shoulder dystocia at 39 weeks pregnant', room:'Emergency Room', level:'Intermediate', pdf:'' },
+  ];
+
+  // ===== บัญชีเข้าใช้ Body Interact (แยกประเภทอาจารย์/นักศึกษา) =====
+  let biSeq = 1;
+  let biAccounts = [
+    { account_id:'BI1', username:'bcnb-bi-t01', password:'BodyInt@01', status:'available', holder_id:'', holder_name:'', account_type:'teacher', updated_at:new Date().toISOString() },
+    { account_id:'BI2', username:'bcnb-bi-t02', password:'BodyInt@02', status:'approved', holder_id:'t001', holder_name:'อ.ดร. ปวีณา ใจดี', account_type:'teacher', updated_at:new Date().toISOString() },
+    { account_id:'BI3', username:'bcnb-bi-s01', password:'BodyInt@03', status:'available', holder_id:'', holder_name:'', account_type:'student', updated_at:new Date().toISOString() },
+    { account_id:'BI4', username:'bcnb-bi-s02', password:'BodyInt@04', status:'pending', holder_id:'ST-5678-d4e5f6', holder_name:'นภา ศรีสุข', account_type:'student', updated_at:new Date().toISOString() },
+    { account_id:'BI5', username:'bcnb-bi-s03', password:'BodyInt@05', status:'available', holder_id:'', holder_name:'', account_type:'student', updated_at:new Date().toISOString() },
+  ];
+
+  function activeOf(date){
+    return bookings.filter(b=>b.date===date && (b.status==='pending'||b.status==='approved'));
+  }
+  function steps(date){
+    const day = activeOf(date);
+    const out = [];
+    for (let m=t2m(settings.open_time); m<t2m(settings.close_time); m+=STEP_MIN){
+      const used = day.filter(b=>overlaps(m, m+STEP_MIN, t2m(b.start_time), t2m(b.end_time))).length;
+      out.push({ time:m2t(m), used, free:Math.max(0, settings.total_stations-used) });
+    }
+    return out;
+  }
+
+  function handle(action, p){
+    return new Promise(resolve=>{
+      setTimeout(()=>resolve(run(action, p)), 260); // จำลอง latency
     });
-    if (dup.length) return { error: 'คุณมีการจองที่คาบเกี่ยวช่วงเวลานี้อยู่แล้ว' };
-
-    // หาเครื่องที่ว่างตลอดช่วงเวลา
-    var overlapping = day.filter(function (b) {
-      return rangesOverlap(startM, endM, t2m(b.start_time), t2m(b.end_time));
-    });
-    if (overlapping.length >= s.total_stations)
-      return { error: 'ช่วงเวลานี้เต็มแล้ว กรุณาเลือกช่วงอื่น' };
-    var station = 1;
-    var stationBusy = function (no) {
-      return overlapping.some(function (b) { return Number(b.station_no) === no; });
-    };
-    while (stationBusy(station)) station++;
-
-    var id = 'BK' + Date.now() + Math.floor(Math.random() * 1000);
-    var rec = {
-      booking_id: id,
-      user_id: String(p.user_id || ''),   // รหัสสาธารณะ (ไม่ใช่เลขบัตร)
-      name: String(p.name || ''),
-      role: String(p.role || 'student'),
-      date: date,
-      start_time: start,
-      end_time: end,
-      station_no: station,
-      subject_case: String(p.subject_case || ''),
-      group_size: parseInt(p.group_size, 10) || 1,
-      group_members: String(p.group_members || ''),
-      bi_account: '',
-      status: 'pending',
-      checked_in: 'no',
-      created_at: new Date(),
-      note: String(p.note || '')
-    };
-    appendRow('Bookings', rec);
-    logAction(p.user_id, 'createBooking ' + id);
-    return { booking: bookingToObj(rec, {}) };
-  } finally {
-    lock.releaseLock();
   }
-}
 
-function findBookingRow(bookingId) {
-  var data = readSheet('Bookings');
-  var b = data.rows.filter(function (r) {
-    return String(r.booking_id) === String(bookingId);
-  })[0];
-  return b || null;
-}
+  function strip(u){ const c = Object.assign({}, u); delete c.password; delete c.cid; return c; }
 
-function apiCancelBooking(p) {
-  var b = findBookingRow(p.booking_id);
-  if (!b) return { error: 'ไม่พบการจองนี้' };
-  var idmap = buildIdMap(readSheet('Users').rows);
-  var staff = (p.role === 'teacher' || p.role === 'admin');
-  if (!staff && toPubUid(b.user_id, idmap) !== String(p.user_id)) {
-    return { error: 'คุณยกเลิกได้เฉพาะการจองของตัวเอง' };
-  }
-  updateRow('Bookings', b._row, { status: 'cancelled' });
-  logAction(p.user_id || p.actor_id, 'cancelBooking ' + p.booking_id);
-  return { ok: true };
-}
-
-function apiDeleteBooking(p) {
-  // ลบถาวร: เฉพาะผู้ดูแลระบบ
-  requireAdmin(p);
-  var b = findBookingRow(p.booking_id);
-  if (!b) return { error: 'ไม่พบการจองนี้' };
-  sheet('Bookings').deleteRow(b._row);
-  logAction(p.actor_id, 'deleteBooking ' + p.booking_id);
-  return { ok: true };
-}
-
-/** อนุมัติ/ปฏิเสธ: ผู้ดูแลระบบเท่านั้น (+ จ่ายบัญชี BI ให้ผู้จองได้) */
-function apiUpdateStatus(p) {
-  requireAdmin(p);
-  var b = findBookingRow(p.booking_id);
-  if (!b) return { error: 'ไม่พบการจองนี้' };
-  var status = String(p.status || '').toLowerCase();
-  if (['approved', 'rejected', 'cancelled', 'pending'].indexOf(status) === -1) {
-    return { error: 'สถานะไม่ถูกต้อง' };
-  }
-  var patch = { status: status };
-  if (p.note !== undefined) patch.note = String(p.note);
-
-  // จ่ายบัญชี BI ให้การจอง (เลือกได้หลายบัญชีเมื่อกลุ่มมีหลายคน)
-  if (status === 'approved' && p.bi_accounts !== undefined) {
-    var ids = Array.isArray(p.bi_accounts)
-      ? p.bi_accounts
-      : String(p.bi_accounts || '').split(',').map(function (x) { return x.trim(); }).filter(String);
-    var idmap = buildIdMap(readSheet('Users').rows);
-    var holderId = toPubUid(b.user_id, idmap);
-    var names = [];
-    ids.forEach(function (accId) {
-      var a = biFind(accId);
-      if (a && String(a.status) !== 'approved') {
-        updateRow('BIAccounts', a._row, {
-          status: 'approved',
-          holder_id: holderId,
-          holder_name: String(b.name || ''),
-          updated_at: new Date()
+  function run(action, p){
+    switch(action){
+      case 'ping': return { ok:true };
+      case 'login': {
+        if (p.role==='admin'){
+          const pass = String(p.password||'');
+          const a = users.find(u=>u.role==='admin' && u.password===pass);
+          if (!a) return { error:'รหัสผ่านผู้ดูแลระบบไม่ถูกต้อง' };
+          return { user: strip(a) };
+        } else if (p.role==='teacher'){
+          const email = String(p.email||'').toLowerCase().trim();
+          const t = users.find(u=>u.email.toLowerCase()===email && u.role==='teacher');
+          if (!t) return { error:'ไม่พบอีเมลนี้ในระบบ กรุณาติดต่อผู้ดูแล' };
+          if (String(t.password||'') !== String(p.password||'')) return { error:'รหัสผ่านไม่ถูกต้อง' };
+          return { user: strip(t) };
+        } else {
+          const cid = String(p.national_id||'').replace(/\D/g,'');
+          if (cid.length !== 13) return { error:'เลขบัตรประชาชนต้องมี 13 หลัก' };
+          const s = users.find(u=>u.cid===cid && u.role==='student');
+          if (!s) return { error:'ไม่พบเลขบัตรประชาชนนี้ในระบบ กรุณาติดต่ออาจารย์' };
+          return { user: strip(s) };
+        }
+      }
+      case 'getSettings': return { settings: JSON.parse(JSON.stringify(settings)) };
+      case 'updateSettings': {
+        if (p.total_stations!==undefined) settings.total_stations = parseInt(p.total_stations,10)||1;
+        if (p.max_duration!==undefined) settings.max_duration = parseInt(p.max_duration,10)||1;
+        if (p.open_days!==undefined) settings.open_days = p.open_days;
+        if (p.open_time!==undefined) settings.open_time = p.open_time;
+        if (p.close_time!==undefined) settings.close_time = p.close_time;
+        return { settings: JSON.parse(JSON.stringify(settings)) };
+      }
+      case 'getBookings': {
+        let list = bookings.slice();
+        if (p.user_id) list = list.filter(b=>b.user_id===String(p.user_id));
+        if (p.status) list = list.filter(b=>b.status===p.status);
+        if (p.date) list = list.filter(b=>b.date===p.date);
+        if (p.from) list = list.filter(b=>b.date>=p.from);
+        if (p.to) list = list.filter(b=>b.date<=p.to);
+        list.sort((a,b)=>(a.date+a.start_time).localeCompare(b.date+b.start_time));
+        return { bookings: JSON.parse(JSON.stringify(list)) };
+      }
+      case 'getAvailability': {
+        if (!p.date) return { error:'กรุณาระบุวันที่' };
+        return { date:p.date, total_stations:settings.total_stations,
+          open_time:settings.open_time, close_time:settings.close_time,
+          slot_step:STEP_MIN, max_duration:settings.max_duration,
+          steps: steps(p.date),
+          bookings: activeOf(p.date).map(b=>({start_time:b.start_time,end_time:b.end_time,status:b.status,subject_case:b.subject_case,name:b.name})) };
+      }
+      case 'createBooking': {
+        const date = p.date, start = p.start_time, end = p.end_time;
+        if (!date || !start || !end) return { error:'กรุณาเลือกวันและช่วงเวลา' };
+        const sM = t2m(start), eM = t2m(end);
+        if (eM<=sM) return { error:'เวลาสิ้นสุดต้องหลังเวลาเริ่ม' };
+        if (sM%STEP_MIN!==0 || eM%STEP_MIN!==0) return { error:'เวลาต้องลงตัวเป็นช่วงละ '+STEP_MIN+' นาที' };
+        if (sM<t2m(settings.open_time) || eM>t2m(settings.close_time)) return { error:'จองได้ระหว่าง '+settings.open_time+' – '+settings.close_time+' เท่านั้น' };
+        if (eM-sM > settings.max_duration*60) return { error:'จองได้ไม่เกิน '+settings.max_duration+' ชั่วโมงต่อครั้ง' };
+        const day = activeOf(date);
+        const dup = day.find(b=>b.user_id===String(p.user_id)&&overlaps(sM,eM,t2m(b.start_time),t2m(b.end_time)));
+        if (dup) return { error:'คุณมีการจองที่คาบเกี่ยวช่วงเวลานี้อยู่แล้ว' };
+        const ov = day.filter(b=>overlaps(sM,eM,t2m(b.start_time),t2m(b.end_time)));
+        if (ov.length>=settings.total_stations) return { error:'ช่วงเวลานี้เต็มแล้ว กรุณาเลือกช่วงอื่น' };
+        const usedNos = ov.map(b=>b.station_no);
+        let station=1; while(usedNos.indexOf(station)!==-1) station++;
+        const rec = { booking_id:'BK'+(1000+seq++), user_id:String(p.user_id), name:p.name, role:p.role||'student',
+          date, start_time:start, end_time:end, station_no:station, subject_case:p.subject_case||'',
+          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', bi_account:'',
+          status:'pending', checked_in:'no', created_at:new Date().toISOString(), note:String(p.note||'') };
+        bookings.push(rec);
+        return { booking: JSON.parse(JSON.stringify(rec)) };
+      }
+      case 'cancelBooking': {
+        const b = bookings.find(x=>x.booking_id===p.booking_id);
+        if (!b) return { error:'ไม่พบการจองนี้' };
+        if (p.role!=='teacher' && p.role!=='admin' && b.user_id!==String(p.user_id)) return { error:'ยกเลิกได้เฉพาะของตัวเอง' };
+        b.status='cancelled'; return { ok:true };
+      }
+      case 'deleteBooking': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้นที่ลบได้' };
+        const i = bookings.findIndex(x=>x.booking_id===p.booking_id);
+        if (i===-1) return { error:'ไม่พบการจองนี้' };
+        bookings.splice(i,1); return { ok:true };
+      }
+      case 'updateStatus': {
+        const actor = users.find(u=>u.user_id===String(p.actor_id));
+        if (!actor || actor.role!=='admin') return { error:'ต้องเป็นผู้ดูแลระบบเท่านั้น' };
+        const b = bookings.find(x=>x.booking_id===p.booking_id);
+        if (!b) return { error:'ไม่พบการจองนี้' };
+        b.status = p.status; if (p.note!==undefined) b.note=p.note;
+        if (p.status==='approved' && p.bi_accounts && p.bi_accounts.length){
+          const names=[];
+          p.bi_accounts.forEach(id=>{
+            const a = biAccounts.find(x=>x.account_id===id);
+            if (a && a.status!=='approved'){
+              a.status='approved'; a.holder_id=b.user_id; a.holder_name=b.name; a.updated_at=new Date().toISOString();
+              names.push(a.username);
+            }
+          });
+          if (names.length) b.bi_account = names.join(', ');
+        }
+        return { ok:true };
+      }
+      case 'checkIn': {
+        const b = bookings.find(x=>x.booking_id===p.booking_id);
+        if (!b) return { error:'ไม่พบการจองนี้' };
+        if (b.status!=='approved') return { error:'เช็คอินได้เฉพาะการจองที่อนุมัติแล้ว' };
+        b.checked_in='yes'; return { ok:true };
+      }
+      case 'getUsers': return { users: users.map(strip) };
+      case 'getScenarios': return { scenarios: JSON.parse(JSON.stringify(scenarios)) };
+      case 'getBIAccounts': {
+        const role = p.role; const uid = String(p.user_id||'');
+        let list = biAccounts.map(a=>{
+          const o = { account_id:a.account_id, username:a.username, status:a.status, holder_id:a.holder_id, holder_name:a.holder_name, account_type:a.account_type||'teacher' };
+          if (role==='admin' || (a.status==='approved' && a.holder_id===uid)) o.password = a.password;
+          return o;
         });
-        names.push(String(a.username));
+        if (role==='teacher') list = list.filter(a=>a.account_type==='teacher');
+        if (role==='student') list = list.filter(a=>a.account_type==='student');
+        return { accounts: list };
       }
-    });
-    if (names.length) patch.bi_account = names.join(', ');
-  }
-
-  updateRow('Bookings', b._row, patch);
-  logAction(p.actor_id, 'updateStatus ' + p.booking_id + ' -> ' + status +
-            (patch.bi_account ? ' (BI: ' + patch.bi_account + ')' : ''));
-  return { ok: true };
-}
-
-function apiCheckIn(p) {
-  var b = findBookingRow(p.booking_id);
-  if (!b) return { error: 'ไม่พบการจองนี้' };
-  var idmap = buildIdMap(readSheet('Users').rows);
-  if (p.role !== 'teacher' && p.role !== 'admin' && toPubUid(b.user_id, idmap) !== String(p.user_id)) {
-    return { error: 'เช็คอินได้เฉพาะการจองของตัวเอง' };
-  }
-  if (String(b.status) !== 'approved') {
-    return { error: 'เช็คอินได้เฉพาะการจองที่อนุมัติแล้ว' };
-  }
-  updateRow('Bookings', b._row, { checked_in: 'yes' });
-  logAction(p.user_id, 'checkIn ' + p.booking_id);
-  return { ok: true };
-}
-
-/* ---------------------------------------------------------
- *  USERS / STATS / REPORT
- * ------------------------------------------------------- */
-
-function apiGetUsers(p) {
-  // ส่งออกเฉพาะข้อมูลสาธารณะ: ชื่อ บทบาท กลุ่มเรียน (ไม่มีเลขบัตร/รหัสผ่าน)
-  var rows = readSheet('Users').rows.map(function (u) {
-    var o = publicUser(u);
-    if (String(u.role).toLowerCase() === 'student') o.email = '';
-    return o;
-  });
-  return { users: rows };
-}
-
-/* ---------------------------------------------------------
- *  SCENARIOS
- * ------------------------------------------------------- */
-function apiGetScenarios() {
-  var rows = readSheet('Scenarios').rows;
-  var list = rows.map(function (r) {
-    return {
-      no: String(r.scenario_no || r.no || ''),
-      title: String(r.title || ''),
-      room: String(r.room || ''),
-      level: String(r.level || ''),
-      pdf: String(r.pdf_url || r.pdf || '')
-    };
-  }).filter(function (s) { return s.no || s.title; });
-  return { scenarios: list };
-}
-
-/* ---------------------------------------------------------
- *  BODY INTERACT ACCOUNTS
- *  ชีต BIAccounts: account_id, username, password, status,
- *                  holder_id, holder_name, account_type, updated_at
- *  status: available / pending / approved
- *  account_type: teacher / student  (แยกกลุ่มบัญชีชัดเจน)
- * ------------------------------------------------------- */
-function biFind(accountId) {
-  var rows = readSheet('BIAccounts').rows;
-  return rows.filter(function (r) { return String(r.account_id) === String(accountId); })[0] || null;
-}
-
-function biType(a) {
-  var t = String(a.account_type || '').trim().toLowerCase();
-  return (t === 'student') ? 'student' : 'teacher';
-}
-
-function apiGetBIAccounts(p) {
-  var role = String(p.role || '').toLowerCase();
-  var uid = String(p.user_id || '');
-  var rows = readSheet('BIAccounts').rows;
-  var list = rows.map(function (a) {
-    var o = {
-      account_id: String(a.account_id),
-      username: String(a.username),
-      status: String(a.status || 'available'),
-      holder_id: String(a.holder_id || ''),
-      holder_name: String(a.holder_name || ''),
-      account_type: biType(a)
-    };
-    // เห็นรหัสผ่าน: admin ทุกบัญชี / ผู้ถือบัญชีที่อนุมัติแล้วเห็นของตัวเอง
-    if (role === 'admin' || (o.status === 'approved' && o.holder_id === uid)) {
-      o.password = String(a.password || '');
-    }
-    return o;
-  });
-  // แยกให้เห็นเฉพาะประเภทของตนเอง (admin เห็นทั้งหมด)
-  if (role === 'teacher') list = list.filter(function (a) { return a.account_type === 'teacher'; });
-  if (role === 'student') list = list.filter(function (a) { return a.account_type === 'student'; });
-  return { accounts: list };
-}
-
-function apiAddBIAccount(p) {
-  requireAdmin(p);
-  var username = String(p.username || '').trim();
-  var password = String(p.password || '').trim();
-  var type = String(p.account_type || 'teacher').toLowerCase() === 'student' ? 'student' : 'teacher';
-  if (!username || !password) return { error: 'กรุณากรอก username และ password' };
-  var id = 'BI' + Date.now() + Math.floor(Math.random() * 1000);
-  appendRow('BIAccounts', {
-    account_id: id, username: username, password: password,
-    status: 'available', holder_id: '', holder_name: '',
-    account_type: type, updated_at: new Date()
-  });
-  logAction(p.actor_id, 'addBIAccount ' + username + ' (' + type + ')');
-  return { ok: true };
-}
-
-function apiRequestBIAccount(p) {
-  var a = biFind(p.account_id);
-  if (!a) return { error: 'ไม่พบบัญชีนี้' };
-  if (String(a.status) !== 'available') return { error: 'บัญชีนี้ถูกใช้งานอยู่' };
-  // ขอได้เฉพาะบัญชีประเภทเดียวกับบทบาทตนเอง (admin ขอแทนได้ทุกประเภท)
-  var role = String(p.role || '').toLowerCase();
-  if (role !== 'admin' && biType(a) !== role) {
-    return { error: 'บัญชีนี้เป็นของกลุ่ม' + (biType(a) === 'teacher' ? 'อาจารย์' : 'นักศึกษา') + 'เท่านั้น' };
-  }
-  updateRow('BIAccounts', a._row, {
-    status: 'pending', holder_id: String(p.user_id || ''),
-    holder_name: String(p.name || ''), updated_at: new Date()
-  });
-  logAction(p.user_id, 'requestBIAccount ' + p.account_id);
-  return { ok: true };
-}
-
-function apiApproveBIAccount(p) {
-  requireAdmin(p);
-  var a = biFind(p.account_id);
-  if (!a) return { error: 'ไม่พบบัญชีนี้' };
-  if (String(a.status) !== 'pending') return { error: 'บัญชีนี้ไม่มีคำขอที่รออนุมัติ' };
-  updateRow('BIAccounts', a._row, { status: 'approved', updated_at: new Date() });
-  logAction(p.actor_id, 'approveBIAccount ' + p.account_id);
-  return { ok: true };
-}
-
-function apiReleaseBIAccount(p) {
-  var a = biFind(p.account_id);
-  if (!a) return { error: 'ไม่พบบัญชีนี้' };
-  var role = String(p.role || '').toLowerCase();
-  if (role !== 'admin' && String(a.holder_id) !== String(p.user_id || '')) {
-    return { error: 'คืนได้เฉพาะบัญชีของตัวเอง' };
-  }
-  updateRow('BIAccounts', a._row, { status: 'available', holder_id: '', holder_name: '', updated_at: new Date() });
-  logAction(p.user_id || p.actor_id, 'releaseBIAccount ' + p.account_id);
-  return { ok: true };
-}
-
-function apiDeleteBIAccount(p) {
-  requireAdmin(p);
-  var a = biFind(p.account_id);
-  if (!a) return { error: 'ไม่พบบัญชีนี้' };
-  sheet('BIAccounts').deleteRow(a._row);
-  logAction(p.actor_id, 'deleteBIAccount ' + p.account_id);
-  return { ok: true };
-}
-
-/* ---------------------------------------------------------
- *  สิทธิ์ผู้ใช้  (ตรวจจาก actor_id ซึ่งเป็นรหัสสาธารณะ)
- * ------------------------------------------------------- */
-function actorOf(p) {
-  var users = readSheet('Users').rows;
-  var target = String(p.actor_id || '');
-  return users.filter(function (u) {
-    return pubId(u) === target || String(u.user_id) === target;
-  })[0] || null;
-}
-
-// อาจารย์หรือผู้ดูแลระบบ
-function requireStaff(p) {
-  var actor = actorOf(p);
-  var role = actor ? String(actor.role).toLowerCase() : '';
-  if (role !== 'teacher' && role !== 'admin') throw new Error('ต้องเป็นอาจารย์หรือผู้ดูแลระบบเท่านั้น');
-  return actor;
-}
-
-// ผู้ดูแลระบบเท่านั้น (อนุมัติ / ลบถาวร / ตั้งค่า)
-function requireAdmin(p) {
-  var actor = actorOf(p);
-  var role = actor ? String(actor.role).toLowerCase() : '';
-  if (role !== 'admin') throw new Error('ต้องเป็นผู้ดูแลระบบเท่านั้น');
-  return actor;
-}
-
-function apiGetStats(p) {
-  var all = allBookingsPub();
-  var s = apiGetSettings().settings;
-  var today = fmtDate(new Date());
-
-  var todays = all.filter(function (b) {
-    return b.date === today && b.status !== 'cancelled' && b.status !== 'rejected';
-  });
-
-  var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
-  var weekStr = fmtDate(weekAgo);
-  var weekly = all.filter(function (b) {
-    return b.date >= weekStr && b.date <= today &&
-           b.status !== 'cancelled' && b.status !== 'rejected';
-  });
-
-  // นับช่วง 30 นาทีที่ยังว่างของวันนี้
-  var avail = apiGetAvailability({ date: today });
-  var freeToday = 0, totalSteps = 0;
-  if (avail.steps) {
-    avail.steps.forEach(function (st) { freeToday += st.free; });
-    totalSteps = avail.steps.length * s.total_stations;
-  }
-
-  var freeBI = readSheet('BIAccounts').rows.filter(function (a) {
-    return String(a.status || 'available').toLowerCase() === 'available';
-  }).length;
-
-  return {
-    today: today,
-    bookings_today: todays.length,
-    pending: all.filter(function (b) { return b.status === 'pending'; }).length,
-    approved_today: todays.filter(function (b) { return b.status === 'approved'; }).length,
-    free_slots_today: freeToday,
-    free_bi_today: freeBI,
-    total_slots_today: totalSteps,
-    weekly_total: weekly.length,
-    checked_in_today: todays.filter(function (b) { return b.checked_in === 'yes'; }).length
-  };
-}
-
-function apiGetReport(p) {
-  var all = allBookingsPub();
-  if (p.from) all = all.filter(function (b) { return b.date >= fmtDate(p.from); });
-  if (p.to)   all = all.filter(function (b) { return b.date <= fmtDate(p.to); });
-
-  var byUser = {};
-  all.forEach(function (b) {
-    if (b.status === 'cancelled' || b.status === 'rejected') return;
-    var k = b.user_id; // รหัสสาธารณะ
-    if (!byUser[k]) byUser[k] = { user_id: b.user_id, name: b.name, count: 0, cases: {} };
-    byUser[k].count++;
-    var c = b.subject_case || '(ไม่ระบุ)';
-    byUser[k].cases[c] = (byUser[k].cases[c] || 0) + 1;
-  });
-  var users = Object.keys(byUser).map(function (k) {
-    var u = byUser[k];
-    u.cases = Object.keys(u.cases).map(function (c) { return { case: c, count: u.cases[c] }; });
-    return u;
-  }).sort(function (a, b) { return b.count - a.count; });
-
-  var byCase = {};
-  all.forEach(function (b) {
-    if (b.status === 'cancelled' || b.status === 'rejected') return;
-    var c = b.subject_case || '(ไม่ระบุ)';
-    byCase[c] = (byCase[c] || 0) + 1;
-  });
-  var cases = Object.keys(byCase).map(function (c) {
-    return { case: c, count: byCase[c] };
-  }).sort(function (a, b) { return b.count - a.count; });
-
-  return { by_user: users, by_case: cases, total: all.length };
-}
-
-/* ---------------------------------------------------------
- *  UPGRADE: รันหนึ่งครั้งหลังอัปเดตโค้ด (เมนู Run > upgradeSheets)
- *  เพิ่มคอลัมน์ใหม่ + ค่าเริ่มต้น โดยไม่กระทบข้อมูลเดิม
- * ------------------------------------------------------- */
-function upgradeSheets() {
-  var need = {
-    'Settings':   ['open_time', 'close_time'],
-    'Bookings':   ['bi_account'],
-    'BIAccounts': ['account_type']
-  };
-  Object.keys(need).forEach(function (name) {
-    var sh = sheet(name);
-    var lastCol = sh.getLastColumn();
-    var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0]
-      .map(function (h) { return String(h).trim(); });
-    need[name].forEach(function (col) {
-      if (headers.indexOf(col) === -1) {
-        lastCol++;
-        sh.getRange(1, lastCol).setValue(col);
-        headers.push(col);
+      case 'addBIAccount': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
+        const u = String(p.username||'').trim(); const pw = String(p.password||'').trim();
+        const type = p.account_type==='student'?'student':'teacher';
+        if (!u || !pw) return { error:'กรุณากรอก username และ password' };
+        biAccounts.push({ account_id:'BI'+(100+biSeq++), username:u, password:pw, status:'available', holder_id:'', holder_name:'', account_type:type, updated_at:new Date().toISOString() });
+        return { ok:true };
       }
-    });
-  });
-  // ค่าเริ่มต้น Settings
-  var s = rawSettings();
-  var patch = {};
-  if (!fmtTime(s.open_time))  patch.open_time = '08:00';
-  if (!fmtTime(s.close_time)) patch.close_time = '20:00';
-  patch.open_time = s.open_time || '08:00';
-  patch.close_time = s.close_time || '20:00';
-  updateRow('Settings', s._row, patch);
-  // ค่าเริ่มต้นประเภทบัญชี BI = teacher
-  var bi = readSheet('BIAccounts');
-  bi.rows.forEach(function (a) {
-    if (!String(a.account_type || '').trim()) {
-      updateRow('BIAccounts', a._row, { account_type: 'teacher' });
+      case 'requestBIAccount': {
+        const a = biAccounts.find(x=>x.account_id===p.account_id);
+        if (!a) return { error:'ไม่พบบัญชีนี้' };
+        if (a.status!=='available') return { error:'บัญชีนี้ถูกใช้งานอยู่' };
+        const role = String(p.role||'').toLowerCase();
+        if (role!=='admin' && (a.account_type||'teacher')!==role)
+          return { error:'บัญชีนี้เป็นของกลุ่ม'+((a.account_type==='teacher')?'อาจารย์':'นักศึกษา')+'เท่านั้น' };
+        a.status='pending'; a.holder_id=String(p.user_id||''); a.holder_name=String(p.name||''); a.updated_at=new Date().toISOString();
+        return { ok:true };
+      }
+      case 'approveBIAccount': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
+        const a = biAccounts.find(x=>x.account_id===p.account_id);
+        if (!a) return { error:'ไม่พบบัญชีนี้' };
+        if (a.status!=='pending') return { error:'บัญชีนี้ไม่มีคำขอที่รออนุมัติ' };
+        a.status='approved'; a.updated_at=new Date().toISOString();
+        return { ok:true };
+      }
+      case 'releaseBIAccount': {
+        const a = biAccounts.find(x=>x.account_id===p.account_id);
+        if (!a) return { error:'ไม่พบบัญชีนี้' };
+        if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return { error:'คืนได้เฉพาะบัญชีของตัวเอง' };
+        a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
+        return { ok:true };
+      }
+      case 'deleteBIAccount': {
+        if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
+        const i = biAccounts.findIndex(x=>x.account_id===p.account_id);
+        if (i===-1) return { error:'ไม่พบบัญชีนี้' };
+        biAccounts.splice(i,1); return { ok:true };
+      }
+      case 'getStats': {
+        const today = todayISO();
+        const todays = bookings.filter(b=>b.date===today && b.status!=='cancelled' && b.status!=='rejected');
+        const weekAgo = toISO(addDays(new Date(),-6));
+        const weekly = bookings.filter(b=>b.date>=weekAgo && b.date<=today && b.status!=='cancelled' && b.status!=='rejected');
+        const st = steps(today);
+        return { today, bookings_today:todays.length,
+          pending: bookings.filter(b=>b.status==='pending').length,
+          free_slots_today: st.reduce((n,s)=>n+s.free,0),
+          free_bi_today: biAccounts.filter(a=>a.status==='available').length,
+          weekly_total: weekly.length,
+          checked_in_today: todays.filter(b=>b.checked_in==='yes').length };
+      }
+      case 'getReport': {
+        let list = bookings.filter(b=>b.status!=='cancelled'&&b.status!=='rejected');
+        const byUser={}, byCase={};
+        list.forEach(b=>{
+          if(!byUser[b.user_id]) byUser[b.user_id]={user_id:b.user_id,name:b.name,count:0,cases:{}};
+          byUser[b.user_id].count++;
+          const c=b.subject_case||'(ไม่ระบุ)';
+          byUser[b.user_id].cases[c]=(byUser[b.user_id].cases[c]||0)+1;
+          byCase[c]=(byCase[c]||0)+1;
+        });
+        const usersR = Object.values(byUser).map(u=>({...u, cases:Object.keys(u.cases).map(c=>({case:c,count:u.cases[c]}))})).sort((a,b)=>b.count-a.count);
+        const casesR = Object.keys(byCase).map(c=>({case:c,count:byCase[c]})).sort((a,b)=>b.count-a.count);
+        return { by_user:usersR, by_case:casesR, total:list.length };
+      }
+      default: return { error:'ไม่รู้จัก action: '+action };
     }
-  });
-  Logger.log('upgradeSheets: เสร็จสิ้น');
-}
+  }
+  return { handle };
+})();
+
+/* =========================================================
+   เริ่มทำงาน
+   ========================================================= */
+window.addEventListener('DOMContentLoaded', App.boot);

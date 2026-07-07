@@ -562,6 +562,11 @@ Views._slotsRender = function(dateISO, d){
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
           <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
         </div>
+        <div class="field">
+          <label for="bkBiCount">จำนวนบัญชี BI ที่ต้องการใช้</label>
+          <input class="input" id="bkBiCount" type="number" min="0" max="20" value="1" />
+          <div class="help">ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติการจอง</div>
+        </div>
       </div>
       <div class="field">
         <label for="bkTeacher">อาจารย์ผู้สอน / อาจารย์ผู้ควบคุม</label>
@@ -691,7 +696,8 @@ Views.submitBooking = async function(){
     supervisor: $('bkTeacher').value,
     note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value,10)||1,
-    group_members: Views._members.map(m=>m.name).join(', ')
+    group_members: Views._members.map(m=>m.name).join(', '),
+    bi_count: parseInt($('bkBiCount') && $('bkBiCount').value, 10) || 0
   });
   setLoading(btn, false, 'ยืนยันการจอง');
   if (r.error) return toast(r.error, 'err');
@@ -822,7 +828,7 @@ App.dayDetail = function(iso){
       </div>
       ${b.supervisor?`<div class="dd-case" style="color:var(--muted)">อาจารย์ผู้ควบคุม: ${esc(b.supervisor)}</div>`:''}
       ${b.group_members?`<div class="dd-case" style="color:var(--muted)">กลุ่ม: ${esc(b.group_members)}</div>`:''}
-      ${b.bi_account?`<div class="dd-case ${isAdmin()?'':'secure'}">${svg(I.key)} บัญชี BI: <b>${isAdmin()?esc(b.bi_account):esc(maskBIList(b.bi_account))}</b></div>`:''}
+      ${b.bi_account?`<div class="dd-case ${isAdmin()?'':'secure'}">${svg(I.key)} บัญชี BI: <b>${esc(b.bi_account)}</b></div>`:''}
       ${act}
     </div>`;
   }).join('') : `<div class="dd-slot"><div class="dd-empty">ยังไม่มีการจองในวันนี้</div></div>`;
@@ -929,6 +935,7 @@ App.approve = async function(id){
   const info = b ? `<div class="asn-bk">
       <b>${esc(b.name)}</b> · ${fmtThaiShort(b.date)} · ${esc(b.start_time)}–${esc(b.end_time)}
       ${b.group_size>1?`<span class="badge in">${b.group_size} คน</span>`:''}
+      ${b.bi_count?`<span class="badge pending">ขอบัญชี BI ${esc(String(b.bi_count))} บัญชี</span>`:''}
       ${b.group_members?`<div class="help">กลุ่ม: ${esc(b.group_members)}</div>`:''}
     </div>` : '';
   openModal(`
@@ -1199,7 +1206,8 @@ Views._tbiRender = function(m, d){
     const pg = paginate('bi_my', list);
     listHtml = `
       <div class="card">
-        <div class="bi-list secure">${list.length ? pg.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีสำหรับกลุ่มของคุณ','รอผู้ดูแลเพิ่มบัญชี')}</div>
+        <div class="section-head"><h3>${svg(I.key)} บัญชีที่ได้รับมอบหมาย</h3><span class="hint">${list.length} บัญชี</span></div>
+        <div class="bi-list secure">${list.length ? pg.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีที่ได้รับมอบหมาย','จองคิวและระบุจำนวนบัญชี BI ที่ต้องการ ผู้ดูแลระบบจะจ่ายบัญชีให้เมื่ออนุมัติ')}</div>
         ${pg.html}
       </div>`;
   }
@@ -1225,39 +1233,24 @@ Views._tbiRender = function(m, d){
             </select></div>
         </div>
         <button class="btn btn-primary" onclick="Views.biAdd()">${svg(I.plus)}เพิ่มบัญชี</button>
-      </div>` : `<div class="login-note" style="margin:0 0 16px">${svg(I.info)}<span>เลือก “ขอใช้งาน” บัญชีที่ว่าง เมื่อผู้ดูแลระบบอนุมัติแล้ว ใช้ปุ่ม “คัดลอกไปใช้” เพื่อนำ username และรหัสผ่านไปวางในหน้า login ของ Body Interact ได้โดยไม่ต้องแสดงบนจอ หรือ “กดค้างเพื่อดู” หากต้องการอ่าน</span></div>`}
+      </div>` : `<div class="login-note" style="margin:0 0 16px">${svg(I.info)}<span>ระบุจำนวนบัญชี BI ที่ต้องการตอนจองคิว เมื่อผู้ดูแลระบบอนุมัติแล้ว บัญชีที่ได้รับจะแสดงที่นี่ — ใช้ปุ่ม “คัดลอกไปใช้” เพื่อนำไปวางในหน้า login ของ Body Interact หรือ “กดค้างเพื่อดู” หากต้องการอ่านรหัสผ่าน</span></div>`}
 
       ${listHtml}
     </div>`;
   if (!admin) App._wmApply(); // ประทับลายน้ำผู้ดูลงบนรายการบัญชี
 };
-/* ปิดบัง username ฝั่งจอ (สำรอง กรณีเซิร์ฟเวอร์ยังเป็นเวอร์ชันเก่า) */
-function maskBI(u){
-  u = String(u||'');
-  if (u.indexOf('•••')===0) return u; // ถูกปิดบังจากเซิร์ฟเวอร์แล้ว
-  const at = u.indexOf('@');
-  const local = at===-1 ? u : u.slice(0, at);
-  const tail = local.length>3 ? local.slice(-3) : local;
-  return '•••'+tail+(at===-1?'':'@…');
-}
-/* ปิดบังรายชื่อบัญชีแบบหลายบัญชี ("user1, user2") */
-function maskBIList(s){
-  return String(s||'').split(',').map(x=>maskBI(x.trim())).filter(String).join(', ');
-}
-
 function biCard(a, admin, typeBadge){
   const mine = a.holder_id===State.user.user_id;
-  const unShown = admin ? esc(a.username) : esc(maskBI(a.username));
   let right = '';
   if (admin){
     right = `${a.status==='pending'?`<button class="btn btn-primary btn-sm" onclick="Views.biApprove('${a.account_id}')">${svg(I.check)}อนุมัติ</button>`:''}
       ${a.status!=='available'?`<button class="btn btn-warn btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`:''}
       <button class="btn btn-danger btn-sm" onclick="Views.biDelete('${a.account_id}')">${svg(I.x)}ลบ</button>`;
   } else {
-    if (a.status==='available') right = `<button class="btn btn-primary btn-sm" onclick="Views.biRequest('${a.account_id}')">${svg(I.key)}ขอใช้งาน</button>`;
-    else if (a.status==='pending' && mine) right = `<span class="badge pending">รออนุมัติ</span>`;
+    // ผู้ใช้ทั่วไปเลือกบัญชีเองไม่ได้ — เห็นเฉพาะบัญชีที่ผู้ดูแลจ่ายให้ และคืนบัญชีของตัวเองได้
+    if (a.status==='pending' && mine) right = `<span class="badge pending">รออนุมัติ</span>`;
     else if (a.status==='approved' && mine) right = `<button class="btn btn-soft btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`;
-    else right = `<span class="badge" style="background:#EEF1F0;color:#8A9794">ไม่ว่าง</span>`;
+    else right = '';
   }
   let pwRow;
   if (a.password !== undefined){
@@ -1283,7 +1276,7 @@ function biCard(a, admin, typeBadge){
   const who = a.holder_name ? `<span class="bi-holder">${a.status==='approved'?'ผู้ใช้:':'ผู้ขอ:'} ${esc(a.holder_name)}</span>` : '';
   return `<div class="bi-item">
     <div class="bi-main">
-      <div class="bi-user">${svg(I.user)}<b id="un_${esc(String(a.account_id))}">${unShown}</b> ${typeBadge?typeBadge(a.account_type):''} ${biStatusBadge(a.status)}</div>
+      <div class="bi-user">${svg(I.user)}<b>${esc(a.username)}</b> ${typeBadge?typeBadge(a.account_type):''} ${biStatusBadge(a.status)}</div>
       ${who}
       ${(admin || (a.status==='approved'&&mine)) ? pwRow : (a.status==='pending'&&mine ? `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>` : '')}
     </div>
@@ -1331,15 +1324,11 @@ Views.biDelete = function(id){
 App.pwShow = function(id){
   const el = $('pw_'+id); if (!el) return;
   el.textContent = (State._pwMap||{})[id] || '';
-  const un = $('un_'+id); // เผยชื่อบัญชีเต็มพร้อมกัน (เฉพาะเจ้าของ)
-  if (un && (State._unMap||{})[id]) un.textContent = State._unMap[id];
   const row = $('pwrow_'+id); if (row) row.classList.add('reveal');
 };
 App.pwHide = function(id){
   const el = $('pw_'+id); if (!el) return;
   el.textContent = '••••••••';
-  const un = $('un_'+id);
-  if (un && (State._unMap||{})[id]) un.textContent = maskBI(State._unMap[id]);
   const row = $('pwrow_'+id); if (row) row.classList.remove('reveal');
 };
 App.pwHideAll = function(){ Object.keys(State._pwMap||{}).forEach(id=>App.pwHide(id)); };
@@ -1482,7 +1471,8 @@ function teacherBookingCard(b){
           ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
           ${b.supervisor?`<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>`:''}
           ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
-          ${b.bi_account?`<span class="${isAdmin()?'':'secure'}">บัญชี BI: <b>${isAdmin()?esc(b.bi_account):esc(maskBIList(b.bi_account))}</b></span>`:''}
+          ${b.bi_count?`<span>ขอบัญชี BI: <b>${esc(String(b.bi_count))}</b></span>`:''}
+          ${b.bi_account?`<span class="${isAdmin()?'':'secure'}">บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
         </div>
       </div>
       ${statusBadge(b.status)}
@@ -1517,7 +1507,7 @@ function rowBooking(b){
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case||'—')}</td>
     <td>${esc(b.supervisor||'—')}</td>
-    <td>${b.bi_account?`<span class="${isAdmin()?'':'secure'}">${isAdmin()?esc(b.bi_account):esc(maskBIList(b.bi_account))}</span>`:'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${b.bi_account?`<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>`:(b.bi_count?`<span style="color:var(--muted)">ขอ ${esc(String(b.bi_count))}</span>`:'<span style="color:var(--muted)">—</span>')}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td><div class="row-actions">${act}</div></td>

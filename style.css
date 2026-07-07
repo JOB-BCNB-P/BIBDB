@@ -601,6 +601,27 @@ textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
 .bi-pass.muted svg { color: var(--muted); }
 .bi-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* ===== ความปลอดภัยรหัสผ่าน BI (ผู้ใช้ที่ไม่ใช่ผู้ดูแลระบบ) ===== */
+/* ห้ามคลุมดำ/เลือกข้อความ ในส่วนข้อมูลบัญชี BI */
+.secure, .secure * {
+  -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
+  -webkit-touch-callout: none; /* กัน iOS กดค้างแล้วขึ้นเมนู copy */
+}
+/* รหัสผ่านที่ถูกซ่อน (••••) */
+.pw-mask { min-width: 88px; text-align: center; }
+.pw-eye { white-space: nowrap; }
+/* ลายน้ำชื่อผู้ดู แสดงเฉพาะตอนกดดูรหัส — ถ่ายภาพหน้าจอไปก็ระบุตัวผู้ดูได้ */
+.bi-pass .pw-wm { display: none; }
+.bi-pass.reveal .pw-wm {
+  display: inline-block; font-size: .72rem; color: var(--muted);
+  border: 1px dashed var(--muted); border-radius: 6px; padding: 1px 7px; opacity: .85;
+}
+/* สั่งพิมพ์หน้า → ไม่พิมพ์รหัสผ่านและปุ่มดูรหัส */
+@media print {
+  .secure .pw-mask, .secure .pw-eye, .bi-pass.secure code { display: none !important; }
+  .secure::after { content: 'ข้อมูลถูกซ่อนเพื่อความปลอดภัย'; font-size: .8rem; color: #999; }
+}
+
 /* วันที่คลิกได้บนปฏิทิน login + modal รายละเอียดรายวัน */
 .mc-cell.click { cursor: pointer; transition: background .15s, transform .12s; }
 .mc-cell.click:hover { background: var(--mint-soft); transform: translateY(-1px); }

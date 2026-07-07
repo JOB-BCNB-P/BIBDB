@@ -351,6 +351,7 @@ const App = {
       if (s && s.settings) Cache.set('v:settings', s.settings);
     }
 
+    App._secureGuards(); // ป้องกันคัดลอกข้อมูลบัญชี BI ทุกหน้า (ยกเว้นผู้ดูแล)
     App.renderNav();
     App.go(isStaff() ? 'tdash' : 'sdash');
   },
@@ -821,7 +822,7 @@ App.dayDetail = function(iso){
       </div>
       ${b.supervisor?`<div class="dd-case" style="color:var(--muted)">อาจารย์ผู้ควบคุม: ${esc(b.supervisor)}</div>`:''}
       ${b.group_members?`<div class="dd-case" style="color:var(--muted)">กลุ่ม: ${esc(b.group_members)}</div>`:''}
-      ${b.bi_account?`<div class="dd-case">${svg(I.key)} บัญชี BI: <b>${esc(b.bi_account)}</b></div>`:''}
+      ${b.bi_account?`<div class="dd-case ${isAdmin()?'':'secure'}">${svg(I.key)} บัญชี BI: <b>${esc(b.bi_account)}</b></div>`:''}
       ${act}
     </div>`;
   }).join('') : `<div class="dd-slot"><div class="dd-empty">ยังไม่มีการจองในวันนี้</div></div>`;
@@ -1162,6 +1163,12 @@ Views._tbiRender = function(m, d){
   const r = d.r || {};
   const list = r.accounts || [];
   const admin = isAdmin();
+
+  // เก็บรหัสผ่านไว้ในหน่วยความจำ (ไม่ฝังใน HTML) + เปิดระบบป้องกันการคัดลอก/แคป
+  State._biList = list;
+  State._pwMap = {};
+  list.forEach(a=>{ if (a.password!==undefined) State._pwMap[a.account_id] = a.password; });
+  App._secureGuards();
   const typeBadge = t => `<span class="badge ${t==='teacher'?'in':'approved'}">${t==='teacher'?'อาจารย์':'นักศึกษา'}</span>`;
 
   let listHtml;
@@ -1186,7 +1193,7 @@ Views._tbiRender = function(m, d){
     const pg = paginate('bi_my', list);
     listHtml = `
       <div class="card">
-        <div class="bi-list">${list.length ? pg.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีสำหรับกลุ่มของคุณ','รอผู้ดูแลเพิ่มบัญชี')}</div>
+        <div class="bi-list secure">${list.length ? pg.slice.map(a=>biCard(a, admin, typeBadge)).join('') : emptyState('🔑','ยังไม่มีบัญชีสำหรับกลุ่มของคุณ','รอผู้ดูแลเพิ่มบัญชี')}</div>
         ${pg.html}
       </div>`;
   }
@@ -1230,9 +1237,25 @@ function biCard(a, admin, typeBadge){
     else if (a.status==='approved' && mine) right = `<button class="btn btn-soft btn-sm" onclick="Views.biRelease('${a.account_id}')">คืนบัญชี</button>`;
     else right = `<span class="badge" style="background:#EEF1F0;color:#8A9794">ไม่ว่าง</span>`;
   }
-  const pwRow = (a.password!==undefined)
-    ? `<div class="bi-pass">${svg(I.key)}<span>รหัสผ่าน:</span><code>${esc(a.password)}</code></div>`
-    : (a.status==='approved' && mine ? '' : `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>`);
+  let pwRow;
+  if (a.password !== undefined){
+    if (admin){
+      // ผู้ดูแลระบบ: เห็นรหัสผ่านตรงๆ + ปุ่มคัดลอก username และรหัสผ่าน
+      pwRow = `<div class="bi-pass">${svg(I.key)}<span>รหัสผ่าน:</span><code>${esc(a.password)}</code>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="App.copyBI('${esc(a.account_id)}')">${svg(I.doc)}คัดลอก</button></div>`;
+    } else {
+      // ผู้ใช้ทั่วไป: ซ่อนรหัสผ่าน ต้องกดค้างเพื่อดู + ลายน้ำชื่อผู้ดู (รหัสจริงไม่ฝังใน HTML)
+      const id = esc(String(a.account_id));
+      pwRow = `<div class="bi-pass secure" id="pwrow_${id}">${svg(I.key)}<span>รหัสผ่าน:</span>
+        <code class="pw-mask" id="pw_${id}">••••••••</code>
+        <button class="btn btn-soft btn-sm pw-eye" type="button"
+          onpointerdown="App.pwShow('${id}')" onpointerup="App.pwHide('${id}')"
+          onpointercancel="App.pwHide('${id}')" onpointerleave="App.pwHide('${id}')">กดค้างเพื่อดู</button>
+        <span class="pw-wm">ผู้ดู: ${esc(State.user.name)}</span></div>`;
+    }
+  } else {
+    pwRow = (a.status==='approved' && mine ? '' : `<div class="bi-pass muted">${svg(I.key)}<span>รหัสผ่านจะแสดงหลังได้รับอนุมัติ</span></div>`);
+  }
   const who = a.holder_name ? `<span class="bi-holder">${a.status==='approved'?'ผู้ใช้:':'ผู้ขอ:'} ${esc(a.holder_name)}</span>` : '';
   return `<div class="bi-item">
     <div class="bi-main">
@@ -1276,6 +1299,55 @@ Views.biDelete = function(id){
 };
 
 /* =========================================================
+   ความปลอดภัยรหัสผ่าน BI
+   - ผู้ใช้ทั่วไป: รหัสถูกซ่อน ต้อง "กดค้าง" เพื่อดู / ห้าม copy / ห้ามคลิกขวา
+     สลับหน้าต่าง, กด PrintScreen, เปิดโปรแกรมแคป → ซ่อนรหัสทันที
+   - ผู้ดูแลระบบ: ใช้งานปกติ + ปุ่มคัดลอก username และรหัสผ่าน
+   ========================================================= */
+App.pwShow = function(id){
+  const el = $('pw_'+id); if (!el) return;
+  el.textContent = (State._pwMap||{})[id] || '';
+  const row = $('pwrow_'+id); if (row) row.classList.add('reveal');
+};
+App.pwHide = function(id){
+  const el = $('pw_'+id); if (!el) return;
+  el.textContent = '••••••••';
+  const row = $('pwrow_'+id); if (row) row.classList.remove('reveal');
+};
+App.pwHideAll = function(){ Object.keys(State._pwMap||{}).forEach(id=>App.pwHide(id)); };
+
+App.copyBI = async function(id){
+  if (!isAdmin()) return toast('คัดลอกได้เฉพาะผู้ดูแลระบบเท่านั้น','err');
+  const a = (State._biList||[]).find(x=>String(x.account_id)===String(id)); if (!a) return;
+  try {
+    await navigator.clipboard.writeText(a.username + ' : ' + (a.password||''));
+    toast('คัดลอก username และรหัสผ่านแล้ว','ok');
+  } catch(e){ toast('เบราว์เซอร์ไม่อนุญาตให้คัดลอกอัตโนมัติ','err'); }
+};
+
+App._secureGuards = function(){
+  if (App._secured) return; App._secured = true;
+  const inSecure = e => e.target && e.target.closest && e.target.closest('.secure');
+  // ห้ามคัดลอก/ตัด/คลิกขวา ในส่วนข้อมูลบัญชี BI (เฉพาะผู้ที่ไม่ใช่ผู้ดูแล)
+  document.addEventListener('copy', e=>{
+    if (!isAdmin() && inSecure(e)){ e.preventDefault(); toast('คัดลอกได้เฉพาะผู้ดูแลระบบเท่านั้น','err'); }
+  });
+  document.addEventListener('cut', e=>{ if (!isAdmin() && inSecure(e)) e.preventDefault(); });
+  document.addEventListener('contextmenu', e=>{ if (!isAdmin() && inSecure(e)) e.preventDefault(); });
+  // กด PrintScreen → ซ่อนรหัส + เคลียร์คลิปบอร์ด (เท่าที่เบราว์เซอร์อนุญาต)
+  document.addEventListener('keyup', e=>{
+    if (!isAdmin() && e.key === 'PrintScreen'){
+      App.pwHideAll();
+      try { navigator.clipboard.writeText(' '); } catch(err){}
+      toast('ไม่อนุญาตให้บันทึกภาพหน้าจอรหัสผ่าน','err');
+    }
+  });
+  // สลับหน้าต่าง/แท็บ (เช่น เปิด Snipping Tool) → ซ่อนรหัสทันที
+  window.addEventListener('blur', ()=>{ if (!isAdmin()) App.pwHideAll(); });
+  document.addEventListener('visibilitychange', ()=>{ if (document.hidden && !isAdmin()) App.pwHideAll(); });
+};
+
+/* =========================================================
    COMPONENTS (HTML builders) — เดิม
    ========================================================= */
 function stat(color, icon, num, label){
@@ -1310,7 +1382,7 @@ function bookingCard(b, withActions){
           ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
           ${b.supervisor?`<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>`:''}
           ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
-          ${b.bi_account?`<span>บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
+          ${b.bi_account?`<span class="${isAdmin()?'':'secure'}">บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
           ${b.note?`<span>หมายเหตุ: ${esc(b.note)}</span>`:''}
         </div>
       </div>
@@ -1332,7 +1404,7 @@ function teacherBookingCard(b){
           ${b.subject_case?`<span>เคส: <b>${esc(b.subject_case)}</b></span>`:''}
           ${b.supervisor?`<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>`:''}
           ${b.group_members?`<span>กลุ่ม: ${esc(b.group_members)}</span>`:''}
-          ${b.bi_account?`<span>บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
+          ${b.bi_account?`<span class="${isAdmin()?'':'secure'}">บัญชี BI: <b>${esc(b.bi_account)}</b></span>`:''}
         </div>
       </div>
       ${statusBadge(b.status)}
@@ -1367,7 +1439,7 @@ function rowBooking(b){
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case||'—')}</td>
     <td>${esc(b.supervisor||'—')}</td>
-    <td>${b.bi_account?esc(b.bi_account):'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${b.bi_account?`<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>`:'<span style="color:var(--muted)">—</span>'}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td><div class="row-actions">${act}</div></td>

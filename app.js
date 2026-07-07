@@ -96,6 +96,48 @@ async function api(action, params){
 }
 
 /* =========================================================
+   CLIENT CACHE — เปิดแท็บไวขึ้น
+   หลักการ: แสดงข้อมูลชุดล่าสุดที่เคยโหลดไว้ "ทันที"
+   แล้วดึงข้อมูลใหม่เบื้องหลัง ถ้าเปลี่ยนค่อยวาดซ้ำ (stale-while-revalidate)
+   ========================================================= */
+const CACHE_TTL = 60 * 1000;   // ภายใน 60 วิ ถือว่าข้อมูลยังสด ไม่ดึงซ้ำ
+const CACHE_LS  = 'bi_cache_v1';
+const Cache = {
+  map: {},
+  load(){ try { this.map = JSON.parse(localStorage.getItem(CACHE_LS)) || {}; } catch(e){ this.map = {}; } },
+  save(){ try { localStorage.setItem(CACHE_LS, JSON.stringify(this.map)); } catch(e){} },
+  get(k){ const e = this.map[k]; return e ? e.d : null; },
+  isFresh(k, ttl){ const e = this.map[k]; return !!e && (Date.now() - e.t) < (ttl || CACHE_TTL); },
+  set(k, d){ this.map[k] = { d, t: Date.now() }; this.save(); },
+  /* ทำให้ cache "หมดอายุ" (ยังแสดงได้ทันที แต่จะรีเฟรชแน่นอนเมื่อเปิดหน้า) */
+  stale(prefix){
+    Object.keys(this.map).forEach(k => { if (!prefix || k.startsWith(prefix)) this.map[k].t = 0; });
+    this.save();
+  },
+  wipe(){ this.map = {}; try { localStorage.removeItem(CACHE_LS); } catch(e){} }
+};
+Cache.load();
+
+/* เรียกหลังทำรายการที่เปลี่ยนข้อมูล (จอง/อนุมัติ/ยกเลิก/บัญชี BI ฯลฯ) */
+function invalidateData(){ Cache.stale('v:'); }
+
+/* โหลดข้อมูลของ view:
+   - มี cache → วาดทันที (ไม่ต้องรอ spinner) แล้วรีเฟรชเบื้องหลัง
+   - ไม่มี cache → รอโหลดตามปกติ */
+async function viewSWR(key, fetcher, render, ttl){
+  const tok = State._navToken;
+  const cached = Cache.get(key);
+  if (cached){
+    render(cached, true);
+    if (Cache.isFresh(key, ttl)) return;   // ยังสดอยู่ จบเลย
+  }
+  const fresh = await fetcher();
+  if (fresh && !fresh.__err) Cache.set(key, fresh);
+  if (State._navToken !== tok) return;      // ผู้ใช้เปลี่ยนหน้าไปแล้ว ไม่วาดทับ
+  if (!cached || JSON.stringify(fresh) !== JSON.stringify(cached)) render(fresh, false);
+}
+
+/* =========================================================
    STATE / SESSION
    ========================================================= */
 const State = {
@@ -175,34 +217,39 @@ const App = {
     const cells = [];
     for (let i=0;i<42;i++) cells.push(addDays(first, i));
     const from = toISO(cells[0]), to = toISO(cells[41]);
+    const seq = (State._loginSeq = (State._loginSeq||0) + 1); // กันการกดเปลี่ยนเดือนรัวๆ แล้ววาดทับกัน
 
     grid.innerHTML = '<div class="mc-loading"><div class="spinner"></div></div>';
-    let all = [];
-    try {
-      if (!State._pubSettings){
-        const st = await api('getSettings');
-        State._pubSettings = st.settings || { total_stations:1, open_time:'08:00', close_time:'20:00', open_days:['mon','tue','wed','thu','fri'] };
-      }
-      const bk = await api('getBookings', { from, to });
-      all = (bk.bookings||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
-    } catch(e){ all = []; }
-    State._loginBk = all;
+    await viewSWR('v:logincal:'+from+':'+to, async ()=>{
+      const [st, bk] = await Promise.all([
+        State._pubSettings ? Promise.resolve({ settings: State._pubSettings }) : api('getSettings'),
+        api('getBookings', { from, to })
+      ]);
+      return { st, bk, __err: !!(bk && bk.error) };
+    }, (d)=>{
+      if (seq !== State._loginSeq) return;
+      const g = $('loginCal'); if (!g) return;
+      State._pubSettings = (d.st && d.st.settings) || State._pubSettings
+        || { total_stations:1, open_time:'08:00', close_time:'20:00', open_days:['mon','tue','wed','thu','fri'] };
+      const all = ((d.bk && d.bk.bookings)||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
+      State._loginBk = all;
 
-    const dows = ['จ','อ','พ','พฤ','ศ','ส','อา'];
-    let head = dows.map(d=>`<div class="mc-dow">${d}</div>`).join('');
-    let body = '';
-    cells.forEach(d=>{
-      const iso = toISO(d);
-      const inMonth = d.getMonth()===base.getMonth();
-      const isToday = iso===todayISO();
-      const cnt = all.filter(b=>b.date===iso).length;
-      const click = inMonth ? ` onclick="App.loginDayDetail('${iso}')"` : '';
-      body += `<div class="mc-cell ${inMonth?'':'out'} ${isToday?'today':''} ${inMonth?'click':''} ${cnt>0?'has':''}"${click}>
-        <span class="mc-d">${d.getDate()}</span>
-        ${cnt>0?`<span class="mc-badge">${cnt}</span>`:''}
-      </div>`;
+      const dows = ['จ','อ','พ','พฤ','ศ','ส','อา'];
+      let head = dows.map(x=>`<div class="mc-dow">${x}</div>`).join('');
+      let body = '';
+      cells.forEach(d2=>{
+        const iso = toISO(d2);
+        const inMonth = d2.getMonth()===base.getMonth();
+        const isToday = iso===todayISO();
+        const cnt = all.filter(b=>b.date===iso).length;
+        const click = inMonth ? ` onclick="App.loginDayDetail('${iso}')"` : '';
+        body += `<div class="mc-cell ${inMonth?'':'out'} ${isToday?'today':''} ${inMonth?'click':''} ${cnt>0?'has':''}"${click}>
+          <span class="mc-d">${d2.getDate()}</span>
+          ${cnt>0?`<span class="mc-badge">${cnt}</span>`:''}
+        </div>`;
+      });
+      g.innerHTML = `<div class="mc-grid mc-head">${head}</div><div class="mc-grid mc-body">${body}</div>`;
     });
-    grid.innerHTML = `<div class="mc-grid mc-head">${head}</div><div class="mc-grid mc-body">${body}</div>`;
   },
 
   /* ป็อบอัพรายละเอียดวัน (หน้า login — ไม่แสดงชื่อผู้จอง) */
@@ -276,7 +323,7 @@ const App = {
 
   logout(){
     confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', ()=>{
-      clearSession(); location.reload();
+      clearSession(); Cache.wipe(); location.reload();  // ล้างข้อมูลแคช กันข้อมูลค้างข้ามผู้ใช้
     });
   },
 
@@ -291,8 +338,18 @@ const App = {
     $('uRole').textContent = roleLabel;
     $('uAvatar').textContent = (u.name||'?').trim().charAt(0).toUpperCase();
 
-    const s = await api('getSettings');
-    State.settings = s.settings || { total_stations:1, open_days:['mon','tue','wed','thu','fri'], open_time:'08:00', close_time:'20:00', max_duration:2 };
+    // ตั้งค่าระบบ: ใช้ค่าที่แคชไว้ก่อน (เข้าแอปได้ทันที) แล้วรีเฟรชเบื้องหลัง
+    const cachedS = Cache.get('v:settings');
+    if (cachedS){
+      State.settings = cachedS;
+      api('getSettings').then(s=>{
+        if (s && s.settings){ State.settings = s.settings; Cache.set('v:settings', s.settings); }
+      });
+    } else {
+      const s = await api('getSettings');
+      State.settings = s.settings || { total_stations:1, open_days:['mon','tue','wed','thu','fri'], open_time:'08:00', close_time:'20:00', max_duration:2 };
+      if (s && s.settings) Cache.set('v:settings', s.settings);
+    }
 
     App.renderNav();
     App.go(isStaff() ? 'tdash' : 'sdash');
@@ -337,6 +394,7 @@ const App = {
   },
 
   go(view){
+    State._navToken = (State._navToken || 0) + 1; // กันข้อมูลหน้าเก่ามาวาดทับ
     State.view = view;
     document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.v===view));
     const m = $('main');
@@ -354,10 +412,16 @@ const Views = {};
 
 /* ---------- นักศึกษา: หน้าหลัก ---------- */
 Views.sdash = async function(m){
-  const [bk, st] = await Promise.all([
-    api('getBookings', { user_id: State.user.user_id }),
-    api('getStats')
-  ]);
+  await viewSWR('v:sdash:'+State.user.user_id, async ()=>{
+    const [bk, st] = await Promise.all([
+      api('getBookings', { user_id: State.user.user_id }),
+      api('getStats')
+    ]);
+    return { bk, st, __err: !!(bk.error || st.error) };
+  }, (d)=>Views._sdashRender(m, d));
+};
+Views._sdashRender = function(m, d){
+  const bk = d.bk || {}, st = d.st || {};
   const mine = (bk.bookings||[]);
   const upcoming = mine.filter(b=> b.date>=todayISO() && (b.status==='approved'||b.status==='pending'))
                        .sort((a,b)=> (a.date+a.start_time).localeCompare(b.date+b.start_time));
@@ -380,6 +444,7 @@ Views.sdash = async function(m){
       </div>
     </div>`;
 };
+
 
 /* ---------- จองคิว (ทุกบทบาท: นักศึกษา / อาจารย์ / ผู้ดูแล) ----------
    เวลาแบบยืดหยุ่น: เลือกเวลาเริ่ม–สิ้นสุดเองเป็นช่วงละ 30 นาที */
@@ -414,14 +479,29 @@ Views.loadSlots = async function(dateISO){
     area.innerHTML = emptyState('🚫','วันนี้ไม่เปิดให้จอง','กรุณาเลือกวันทำการตามที่ระบุด้านบน');
     return;
   }
-  const [av, sc, us] = await Promise.all([
-    api('getAvailability', { date: dateISO }),
-    Views._scnCache ? Promise.resolve(Views._scnCache) : api('getScenarios'),
-    Views._userCache ? Promise.resolve(null) : api('getUsers')
-  ]);
+  // ความว่างต้องค่อนข้างสด → TTL สั้น 30 วิ / scenarios & รายชื่อผู้ใช้แคชรวมไปด้วย
+  await viewSWR('v:slots:'+dateISO, async ()=>{
+    const [av, sc, us] = await Promise.all([
+      api('getAvailability', { date: dateISO }),
+      Views._scnCache ? Promise.resolve(Views._scnCache) : api('getScenarios'),
+      Views._userCache ? Promise.resolve({ users: Views._userCache }) : api('getUsers')
+    ]);
+    return {
+      av,
+      sc: (sc && sc.scenarios) ? sc : Views._scnCache,
+      us: (us && us.users) ? us.users : Views._userCache,
+      __err: !!(av && av.error)
+    };
+  }, (d)=>Views._slotsRender(dateISO, d), 30*1000);
+};
+
+Views._slotsRender = function(dateISO, d){
+  if (State.bookDate !== dateISO) return;       // ผู้ใช้เปลี่ยนวันไปแล้ว
+  const area = $('slotArea'); if (!area) return;
+  const av = d.av || {};
   if (av.error){ area.innerHTML = emptyState('⚠️', av.error, ''); return; }
-  if (sc && sc.scenarios) Views._scnCache = sc;
-  if (us && us.users) Views._userCache = us.users;
+  if (d.sc && d.sc.scenarios) Views._scnCache = d.sc;
+  if (d.us) Views._userCache = d.us;
   const scnList = ((Views._scnCache||{}).scenarios)||[];
   State._avail = av;
   Views._members = [];
@@ -614,13 +694,20 @@ Views.submitBooking = async function(){
   });
   setLoading(btn, false, 'ยืนยันการจอง');
   if (r.error) return toast(r.error, 'err');
+  invalidateData();
   toast('จองสำเร็จ! รอผู้ดูแลระบบอนุมัติ', 'ok');
   App.go(isStaff() ? 'tbookings' : 'smine');
 };
 
 /* ---------- นักศึกษา: การจองของฉัน ---------- */
 Views.smine = async function(m){
-  const bk = await api('getBookings', { user_id: State.user.user_id });
+  await viewSWR('v:smine:'+State.user.user_id, async ()=>{
+    const bk = await api('getBookings', { user_id: State.user.user_id });
+    return { bk, __err: !!bk.error };
+  }, (d)=>Views._smineRender(m, d));
+};
+Views._smineRender = function(m, d){
+  const bk = d.bk || {};
   const list = (bk.bookings||[]).sort((a,b)=> (b.date+b.start_time).localeCompare(a.date+a.start_time));
   const pg = paginate('smine', list);
   m.innerHTML = `
@@ -637,12 +724,14 @@ App.cancelMine = function(id){
   confirmModal('ยกเลิกการจอง', 'ต้องการยกเลิกการจองนี้ใช่หรือไม่?', 'ยกเลิกการจอง', async ()=>{
     const r = await api('cancelBooking', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
     if (r.error) return toast(r.error,'err');
+    invalidateData();
     toast('ยกเลิกการจองแล้ว','ok'); App.go(State.view);
   });
 };
 App.checkIn = async function(id){
   const r = await api('checkIn', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
   if (r.error) return toast(r.error,'err');
+  invalidateData();
   toast('เช็คอินเรียบร้อย ✅','ok'); App.go(State.view);
 };
 
@@ -658,7 +747,14 @@ async function renderMonth(m, staff){
   for (let i=0;i<42;i++) cells.push(addDays(first, i));
   const from = toISO(cells[0]), to = toISO(cells[41]);
 
-  const bk = await api('getBookings', { from, to });
+  await viewSWR('v:cal:'+from+':'+to, async ()=>{
+    const bk = await api('getBookings', { from, to });
+    return { bk, __err: !!bk.error };
+  }, (d)=>renderMonthBody(m, staff, base, cells, d));
+}
+
+function renderMonthBody(m, staff, base, cells, d){
+  const bk = d.bk || {};
   const all = (bk.bookings||[]).filter(b=> b.status!=='cancelled' && b.status!=='rejected');
   State._calBk = all;
   State._calStaff = staff;
@@ -741,7 +837,13 @@ App.dayDetail = function(iso){
 
 /* ---------- อาจารย์/ผู้ดูแล: ภาพรวม ---------- */
 Views.tdash = async function(m){
-  const [st, bk] = await Promise.all([ api('getStats'), api('getBookings', { status:'pending' }) ]);
+  await viewSWR('v:tdash', async ()=>{
+    const [st, bk] = await Promise.all([ api('getStats'), api('getBookings', { status:'pending' }) ]);
+    return { st, bk, __err: !!(st.error || bk.error) };
+  }, (d)=>Views._tdashRender(m, d));
+};
+Views._tdashRender = function(m, d){
+  const st = d.st || {}, bk = d.bk || {};
   const pend = (bk.bookings||[]).sort((a,b)=>(a.date+a.start_time).localeCompare(b.date+b.start_time));
   cacheBookings(pend);
   m.innerHTML = `
@@ -765,7 +867,13 @@ Views.tdash = async function(m){
 /* ---------- อาจารย์/ผู้ดูแล: การจองทั้งหมด ---------- */
 Views.tbookings = async function(m){
   State._tFilter = State._tFilter || 'all';
-  const bk = await api('getBookings', {});
+  await viewSWR('v:tbookings', async ()=>{
+    const bk = await api('getBookings', {});
+    return { bk, __err: !!bk.error };
+  }, (d)=>Views._tbookingsRender(m, d));
+};
+Views._tbookingsRender = function(m, d){
+  const bk = d.bk || {};
   let list = (bk.bookings||[]).sort((a,b)=>(b.date+b.start_time).localeCompare(a.date+a.start_time));
   const f = State._tFilter;
   const filtered = f==='all' ? list : list.filter(b=>b.status===f);
@@ -839,6 +947,7 @@ App.confirmApprove = async function(id){
   App._closeModal();
   const r = await api('updateStatus', { booking_id:id, status:'approved', actor_id:State.user.user_id, bi_accounts: ids });
   if (r.error) return toast(r.error,'err');
+  invalidateData();
   toast(ids.length?('อนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'อนุมัติแล้ว','ok');
   App.go(State.view);
 };
@@ -846,25 +955,31 @@ App.reject = function(id){
   if (!isAdmin()) return toast('การปฏิเสธทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   confirmModal('ปฏิเสธการจอง','ต้องการปฏิเสธการจองนี้ใช่หรือไม่?','ปฏิเสธ', async ()=>{
     const r = await api('updateStatus', { booking_id:id, status:'rejected', actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); toast('ปฏิเสธแล้ว','ok'); App.go(State.view);
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ปฏิเสธแล้ว','ok'); App.go(State.view);
   });
 };
 App.teacherCancel = function(id){
   confirmModal('ยกเลิกการจอง','ยืนยันยกเลิกการจองรายการนี้?','ยกเลิก', async ()=>{
     const r = await api('cancelBooking', { booking_id:id, role:State.user.role, user_id:State.user.user_id, actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); toast('ยกเลิกแล้ว','ok'); App.go(State.view);
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ยกเลิกแล้ว','ok'); App.go(State.view);
   });
 };
 App.adminDelete = function(id){
   confirmModal('ลบการจองถาวร','ลบรายการจองนี้ออกจากระบบอย่างถาวร? การกระทำนี้ย้อนกลับไม่ได้','ลบถาวร', async ()=>{
     const r = await api('deleteBooking', { booking_id:id, role:'admin', actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); toast('ลบรายการแล้ว','ok'); App.go(State.view);
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบรายการแล้ว','ok'); App.go(State.view);
   });
 };
 
 /* ---------- อาจารย์/ผู้ดูแล: รายงาน ---------- */
 Views.treport = async function(m){
-  const rp = await api('getReport', {});
+  await viewSWR('v:treport', async ()=>{
+    const rp = await api('getReport', {});
+    return { rp, __err: !!rp.error };
+  }, (d)=>Views._treportRender(m, d));
+};
+Views._treportRender = function(m, d){
+  const rp = d.rp || {};
   const users = rp.by_user||[]; const cases = rp.by_case||[];
   const maxU = Math.max(1, ...users.map(u=>u.count));
   const maxC = Math.max(1, ...cases.map(c=>c.count));
@@ -956,6 +1071,8 @@ App.saveSettings = async function(){
   setLoading(btn, false, 'บันทึกการตั้งค่า');
   if (r.error) return toast(r.error,'err');
   State.settings = r.settings;
+  Cache.set('v:settings', r.settings);
+  invalidateData(); // เวลาเปิด-ปิด/จำนวนเครื่อง กระทบปฏิทินและความว่าง
   toast('บันทึกการตั้งค่าแล้ว','ok');
 };
 
@@ -970,7 +1087,15 @@ function levelBadge(lv){
 
 /* ---------- อาจารย์/ผู้ดูแล: Scenarios ---------- */
 Views.tscenarios = async function(m){
-  const r = await api('getScenarios');
+  // scenarios แทบไม่เปลี่ยน → แคชได้นาน 10 นาที
+  await viewSWR('v:scn', async ()=>{
+    const r = Views._scnCache || await api('getScenarios');
+    return { r, __err: !(r && r.scenarios) };
+  }, (d)=>Views._tscenariosRender(m, d), 10*60*1000);
+};
+Views._tscenariosRender = function(m, d){
+  const r = d.r || {};
+  if (r.scenarios) Views._scnCache = r;
   const all = r.scenarios || [];
   State._scn = all;
   const lv = State._scnLv || 'all';
@@ -1028,7 +1153,13 @@ Views.scnPdf = function(no){
 /* ---------- บัญชีเข้าใช้ Body Interact (ทุกบทบาท)
      แยกประเภทบัญชีชัดเจน: อาจารย์ / นักศึกษา ---------- */
 Views.tbi = async function(m){
-  const r = await api('getBIAccounts', { role:State.user.role, user_id:State.user.user_id });
+  await viewSWR('v:tbi:'+State.user.user_id, async ()=>{
+    const r = await api('getBIAccounts', { role:State.user.role, user_id:State.user.user_id });
+    return { r, __err: !!r.error };
+  }, (d)=>Views._tbiRender(m, d));
+};
+Views._tbiRender = function(m, d){
+  const r = d.r || {};
   const list = r.accounts || [];
   const admin = isAdmin();
   const typeBadge = t => `<span class="badge ${t==='teacher'?'in':'approved'}">${t==='teacher'?'อาจารย์':'นักศึกษา'}</span>`;
@@ -1121,26 +1252,26 @@ Views.biAdd = async function(){
   const account_type = $('biType') ? $('biType').value : 'teacher';
   if (!username || !password) return toast('กรอก username และ password','err');
   const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password, account_type });
-  if (r.error) return toast(r.error,'err'); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
 };
 Views.biRequest = async function(id){
   const r = await api('requestBIAccount', { account_id:id, user_id:State.user.user_id, name:State.user.name, role:State.user.role });
-  if (r.error) return toast(r.error,'err'); toast('ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ','ok'); App.go('tbi');
 };
 Views.biApprove = async function(id){
   const r = await api('approveBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
-  if (r.error) return toast(r.error,'err'); toast('อนุมัติแล้ว','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('อนุมัติแล้ว','ok'); App.go('tbi');
 };
 Views.biRelease = function(id){
   confirmModal('คืนบัญชี','ปล่อยบัญชีนี้กลับเป็นสถานะว่าง?','คืนบัญชี', async ()=>{
     const r = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); toast('คืนบัญชีแล้ว','ok'); App.go('tbi');
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('คืนบัญชีแล้ว','ok'); App.go('tbi');
   });
 };
 Views.biDelete = function(id){
   confirmModal('ลบบัญชี','ลบบัญชี BI นี้ถาวร?','ลบ', async ()=>{
     const r = await api('deleteBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); toast('ลบบัญชีแล้ว','ok'); App.go('tbi');
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบบัญชีแล้ว','ok'); App.go('tbi');
   });
 };
 

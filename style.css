@@ -616,6 +616,13 @@ textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
   display: inline-block; font-size: .72rem; color: var(--muted);
   border: 1px dashed var(--muted); border-radius: 6px; padding: 1px 7px; opacity: .85;
 }
+/* หน้าต่างเสีย focus (เช่น เปิด Snipping Tool) → เบลอข้อมูลบัญชี BI ทันที */
+body.app-blurred .secure {
+  filter: blur(9px);
+  pointer-events: none;
+  transition: filter .1s;
+}
+
 /* สั่งพิมพ์หน้า → ไม่พิมพ์รหัสผ่านและปุ่มดูรหัส */
 @media print {
   .secure .pw-mask, .secure .pw-eye, .bi-pass.secure code { display: none !important; }
@@ -660,20 +667,59 @@ textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
 }
 .dd-slot.pend { background: var(--warn-soft); }
 
-/* ---------- แผนภาพความว่างรายช่วง 30 นาที ---------- */
-.timeline { display: flex; flex-wrap: wrap; gap: 4px; }
-.tl-step {
-  flex: 1 0 52px; max-width: 76px; text-align: center;
-  background: var(--mint-soft); color: var(--mint-deep);
-  border-radius: 8px; padding: 6px 2px; font-size: .72rem; font-weight: 600;
+/* ---------- แผนภาพความว่างรายช่วง 30 นาที (การ์ด + จุดสถานะ) ---------- */
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 12px;
 }
+.tl-step {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  background: var(--mint-soft); color: var(--mint-deep);
+  border-radius: 14px; padding: 15px 6px 13px;
+  font-weight: 700; cursor: default; outline: none;
+  transition: transform .12s, box-shadow .12s;
+}
+.tl-step:hover, .tl-step:focus { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(40,70,60,.12); z-index: 5; }
+.tl-step .tl-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--mint-deep); }
+.tl-step .tl-time { font-size: 1.02rem; letter-spacing: .3px; }
 .tl-step.part { background: var(--warn-soft); color: var(--warn); }
+.tl-step.part .tl-dot { background: var(--warn); }
 .tl-step.full { background: var(--danger-soft); color: var(--danger); }
-.tl-legend { display: flex; align-items: center; gap: 10px; font-size: .78rem; color: var(--muted); margin-top: 8px; }
-.tl-legend .lg { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 4px; vertical-align: -1px; }
-.tl-legend .lg.free { background: var(--mint-soft); }
-.tl-legend .lg.part { background: var(--warn-soft); }
-.tl-legend .lg.full { background: var(--danger-soft); }
+.tl-step.full .tl-dot { background: var(--danger); }
+
+/* ป้ายลอยบอกจำนวนเครื่องว่าง — โผล่เมื่อชี้เมาส์ / แตะ / กด Tab */
+.tl-step .tl-tip {
+  position: absolute; bottom: calc(100% + 9px); left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: #2A3B37; color: #fff;
+  font-size: .78rem; font-weight: 600; white-space: nowrap;
+  padding: 6px 12px; border-radius: 9px;
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s, transform .15s; z-index: 30;
+}
+.tl-step .tl-tip::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: #2A3B37;
+}
+.tl-step:hover .tl-tip, .tl-step:focus .tl-tip, .tl-step:active .tl-tip {
+  opacity: 1; transform: translateX(-50%) translateY(0);
+}
+
+/* คำอธิบายสี (legend) */
+.tl-legend {
+  display: flex; align-items: flex-start; gap: 30px; flex-wrap: wrap;
+  margin-top: 14px; padding: 13px 16px;
+  background: #F8FBFA; border-radius: 12px;
+}
+.tl-legend .lgi { display: flex; align-items: center; gap: 10px; }
+.tl-legend .lg { display: inline-block; width: 18px; height: 18px; border-radius: 50%; flex: none; }
+.tl-legend .lg.free { background: var(--mint-soft); box-shadow: inset 0 0 0 4.5px var(--mint-soft), inset 0 0 0 18px rgba(56,142,110,.45); }
+.tl-legend .lg.part { background: var(--warn-soft); box-shadow: inset 0 0 0 4.5px var(--warn-soft), inset 0 0 0 18px rgba(224,140,20,.5); }
+.tl-legend .lg.full { background: var(--danger-soft); box-shadow: inset 0 0 0 4.5px var(--danger-soft), inset 0 0 0 18px rgba(214,84,110,.45); }
+.tl-legend .lgi b { display: block; font-size: .86rem; color: var(--ink); line-height: 1.25; }
+.tl-legend .lgi small { color: var(--muted); font-size: .75rem; }
 
 .free-ind { display: flex; align-items: center; min-height: 46px; font-weight: 600; font-size: .92rem; }
 .free-ind .ok { color: var(--mint-deep); display: flex; align-items: center; gap: 6px; }

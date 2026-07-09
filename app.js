@@ -518,11 +518,19 @@ Views._slotsRender = function(dateISO, d){
     `<option value="${esc(t.name)}" ${State.user.role==='teacher'&&String(t.user_id)===String(State.user.user_id)?'selected':''}>${esc(t.name)}</option>`
   ).join('');
 
-  // แผนภาพความว่างรายช่วง 30 นาที
+  // แผนภาพความว่างรายช่วง 30 นาที (การ์ด + จุดสถานะ + ป้ายบอกจำนวนเครื่องว่างเมื่อชี้)
   const steps = av.steps||[];
   const stepChips = steps.map(st=>{
     const cls = st.free<=0 ? 'full' : (st.used>0 ? 'part' : '');
-    return `<div class="tl-step ${cls}" title="${st.time} · ว่าง ${st.free}/${av.total_stations}"><span>${st.time}</span></div>`;
+    const endT = m2t(t2m(st.time)+STEP_MIN);
+    const tip = st.free<=0
+      ? `${st.time}–${endT} น. · เต็ม จองไม่ได้`
+      : `${st.time}–${endT} น. · ว่าง ${st.free}/${av.total_stations} เครื่อง`;
+    return `<div class="tl-step ${cls}" tabindex="0">
+      <span class="tl-dot"></span>
+      <span class="tl-time">${st.time}</span>
+      <span class="tl-tip">${tip}</span>
+    </div>`;
   }).join('');
 
   // ตัวเลือกเวลาเริ่ม: เฉพาะช่วงที่ยังว่าง
@@ -532,7 +540,11 @@ Views._slotsRender = function(dateISO, d){
   area.innerHTML = `
     <div class="field"><label>ความว่างของวัน (${fmtThaiDate(dateISO)})</label>
       <div class="timeline">${stepChips || '<div class="help">ยังไม่ได้ตั้งค่าเวลาเปิด-ปิด</div>'}</div>
-      <div class="tl-legend"><span class="lg free"></span>ว่าง <span class="lg part"></span>ว่างบางเครื่อง <span class="lg full"></span>เต็ม</div>
+      <div class="tl-legend">
+        <div class="lgi"><span class="lg free"></span><div><b>ว่าง</b><small>สามารถจองได้ทุกเครื่อง</small></div></div>
+        <div class="lgi"><span class="lg part"></span><div><b>ว่างบางเครื่อง</b><small>บางเครื่องถูกจองแล้ว</small></div></div>
+        <div class="lgi"><span class="lg full"></span><div><b>เต็ม</b><small>ไม่สามารถจองช่วงนี้ได้</small></div></div>
+      </div>
     </div>
     ${startOpts ? `
     <div class="grid cols-3">

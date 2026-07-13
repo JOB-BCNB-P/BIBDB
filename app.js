@@ -285,7 +285,7 @@ const App = {
   async loginStudent(e){
     e.preventDefault();
     const cid = $('sCid').value.replace(/\D/g,'');
-    if (cid.length !== 13) return toast('กรุณากรอกเลขบัตรประชาชนให้ครบ 13 หลัก', 'err');
+    if (cid.length !== 13) return fieldError('sCid', 'เลขบัตรประชาชนต้องมี 13 หลัก (กรอกแล้ว '+cid.length+' หลัก)');
     const btn = e.target.querySelector('button[type=submit]');
     setLoading(btn, true);
     const r = await api('login', { role:'student', national_id: cid });
@@ -399,7 +399,7 @@ const App = {
     State.view = view;
     document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.v===view));
     const m = $('main');
-    m.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด…</div>';
+    m.innerHTML = skeletonView(); // โครงร่างกะพริบระหว่างโหลด (ถ้ามี cache จะถูกแทนที่ทันที)
     const fn = Views[view];
     if (fn) fn(m); else m.innerHTML = '<div class="empty">ไม่พบหน้านี้</div>';
     window.scrollTo({top:0, behavior:'smooth'});
@@ -575,7 +575,7 @@ Views._slotsRender = function(dateISO, d){
           <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
         </div>
         <div class="field">
-          <label for="bkBiCount">จำนวนบัญชี BI ที่ต้องการใช้</label>
+          <label for="bkBiCount">จำนวนเครื่อง / บัญชี BI ที่ต้องการใช้</label>
           <input class="input" id="bkBiCount" type="number" min="0" max="20" value="1" />
           <div class="help">ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติการจอง</div>
         </div>
@@ -696,9 +696,16 @@ Views.renderMemberChips = function(){
 Views.submitBooking = async function(){
   const start = $('bkStart') && $('bkStart').value;
   const end = $('bkEnd') && $('bkEnd').value;
-  if (!start || !end) return toast('กรุณาเลือกช่วงเวลา', 'err');
-  if (!$('bkCase').value) return toast('กรุณาเลือก Scenario ที่จะฝึก', 'err');
-  if (!$('bkTeacher').value) return toast('กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม', 'err');
+  // ตรวจครบทุกช่องก่อน แล้วชี้จุดผิดใต้ช่องนั้นๆ (inline validation)
+  let bad = false;
+  if (!start || !end){ if ($('bkStart')) fieldError('bkStart','กรุณาเลือกช่วงเวลา'); bad = true; }
+  if (!$('bkCase').value){ fieldError('bkCase','กรุณาเลือก Scenario ที่จะฝึก'); bad = true; }
+  if (!$('bkTeacher').value){ fieldError('bkTeacher','กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม'); bad = true; }
+  const size = parseInt($('bkSize').value,10);
+  if (!size || size < 1){ fieldError('bkSize','ระบุจำนวนผู้เข้าฝึกอย่างน้อย 1 คน'); bad = true; }
+  const bic = parseInt($('bkBiCount') && $('bkBiCount').value, 10);
+  if ($('bkBiCount') && (isNaN(bic) || bic < 0)){ fieldError('bkBiCount','จำนวนต้องเป็น 0 ขึ้นไป'); bad = true; }
+  if (bad) return toast('กรุณากรอกข้อมูลให้ครบถ้วน', 'err');
   const btn = event.target;
   setLoading(btn, true);
   const r = await api('createBooking', {
@@ -712,10 +719,10 @@ Views.submitBooking = async function(){
     bi_count: parseInt($('bkBiCount') && $('bkBiCount').value, 10) || 0
   });
   setLoading(btn, false, 'ยืนยันการจอง');
-  if (r.error) return toast(r.error, 'err');
+  if (r.error) return alertDialog('จองไม่สำเร็จ', r.error, 'err'); // แจ้งผลด้วย dialog เต็ม
   invalidateData();
-  toast('จองสำเร็จ! รอผู้ดูแลระบบอนุมัติ', 'ok');
-  App.go(isStaff() ? 'tbookings' : 'smine');
+  alertDialog('จองสำเร็จ!', 'ระบบบันทึกคำขอแล้ว รอผู้ดูแลระบบอนุมัติ', 'ok', 'ตกลง',
+    ()=>App.go(isStaff() ? 'tbookings' : 'smine'));
 };
 
 /* ---------- นักศึกษา: การจองของฉัน ---------- */
@@ -1356,7 +1363,10 @@ function biStatusBadge(s){
 Views.biAdd = async function(){
   const username = $('biUser').value.trim(), password = $('biPass').value.trim();
   const account_type = $('biType') ? $('biType').value : 'teacher';
-  if (!username || !password) return toast('กรอก username และ password','err');
+  let bad = false;
+  if (!username){ fieldError('biUser','กรุณากรอก username'); bad = true; }
+  if (!password){ fieldError('biPass','กรุณากรอกรหัสผ่าน'); bad = true; }
+  if (bad) return;
   const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password, account_type });
   if (r.error) return toast(r.error,'err'); invalidateData(); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
 };
@@ -1569,15 +1579,16 @@ function rowBooking(b){
   return `<tr>
     <td>${fmtThaiShort(b.date)}</td>
     <td>${esc(b.start_time)}–${esc(b.end_time)}</td>
-    <td>#${b.station_no}</td>
+    <td>${b.bi_count
+      ? `<span class="badge pending">ขอ ${esc(String(b.bi_count))} เครื่อง</span>`
+      : '<span style="color:var(--muted)">—</span>'}
+      <div style="font-size:.75rem;color:var(--muted);margin-top:3px">เครื่องที่ #${b.station_no}</div></td>
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case||'—')}</td>
     <td>${esc(b.supervisor||'—')}</td>
     <td>${b.bi_account
-      ? `<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>${b.bi_count?`<div style="font-size:.75rem;color:var(--muted)">ขอ ${esc(String(b.bi_count))} บัญชี</div>`:''}`
-      : (b.bi_count
-        ? `<span class="badge pending">ขอ ${esc(String(b.bi_count))} บัญชี</span>`
-        : '<span style="color:var(--muted)">—</span>')}</td>
+      ? `<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>`
+      : '<span style="color:var(--muted)">—</span>'}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td><div class="row-actions">${act}</div></td>
@@ -1618,16 +1629,74 @@ App.exportReport = async function(){
 };
 
 /* =========================================================
-   UI: toast / modal / loading
+   UI: snackbar / alert dialog / inline validation / loading
    ========================================================= */
-function toast(msg, type){
+
+/* Snackbar: แจ้งเตือนสั้นๆ ด้านล่างจอ — ปิดเองได้ / ใส่ปุ่ม action ได้
+   toast(msg, type, { action:'เลิกทำ', onAction:fn, duration:5000 }) */
+function toast(msg, type, opts){
+  opts = opts || {};
   const host = $('toastHost');
   const el = document.createElement('div');
   el.className = 'toast '+(type||'');
   const ic = type==='ok'?I.check : type==='err'?I.info : I.info;
-  el.innerHTML = svg(ic)+'<span>'+esc(msg)+'</span>';
+  el.innerHTML = svg(ic)+'<span>'+esc(msg)+'</span>'
+    + (opts.action ? `<button type="button" class="toast-act">${esc(opts.action)}</button>` : '')
+    + '<button type="button" class="toast-x" aria-label="ปิด">&times;</button>';
   host.appendChild(el);
-  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(10px)'; setTimeout(()=>el.remove(),300); }, 3000);
+  const close = ()=>{ el.style.opacity='0'; el.style.transform='translateY(10px)'; setTimeout(()=>el.remove(),300); };
+  el.querySelector('.toast-x').onclick = close;
+  if (opts.action && opts.onAction){
+    el.querySelector('.toast-act').onclick = ()=>{ opts.onAction(); close(); };
+  }
+  setTimeout(close, opts.duration || 3500);
+}
+
+/* Alert Dialog: กล่องแจ้งผลแบบเต็ม ใช้กับเรื่องสำคัญ (สำเร็จ/ผิดพลาด/คำเตือน)
+   alertDialog('จองไม่สำเร็จ', 'ช่วงเวลานี้เต็มแล้ว', 'err') */
+function alertDialog(title, msg, type, okLabel, onOk){
+  const ico = type==='ok' ? I.check : (type==='warn' ? I.info : I.x);
+  const host = $('modalHost');
+  host.innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal" style="text-align:center">
+      <div class="dlg-ico ${type||'err'}">${svg(ico)}</div>
+      <h3>${esc(title)}</h3>
+      <p class="modal-sub" style="margin-bottom:0">${esc(msg||'')}</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary btn-block" id="dlgOk">${esc(okLabel||'ตกลง')}</button>
+      </div>
+    </div></div>`;
+  $('dlgOk').onclick = ()=>{ App._closeModal(); if (onOk) onOk(); };
+}
+
+/* Inline Validation: ขีดแดงใต้ช่องกรอก + ข้อความบอกจุดผิดตรงช่องนั้น
+   หายเองทันทีที่ผู้ใช้เริ่มแก้ไข */
+function fieldError(id, msg){
+  const el = $(id); if (!el) return;
+  el.classList.add('invalid');
+  const holder = el.closest('.field') || el.parentElement;
+  let e = holder.querySelector('.field-error');
+  if (!e){ e = document.createElement('div'); e.className = 'field-error'; holder.appendChild(e); }
+  e.innerHTML = svg(I.info) + '<span>' + esc(msg) + '</span>';
+  const clear = ()=>clearFieldError(id);
+  el.addEventListener('input', clear, { once:true });
+  el.addEventListener('change', clear, { once:true });
+}
+function clearFieldError(id){
+  const el = $(id); if (!el) return;
+  el.classList.remove('invalid');
+  const holder = el.closest('.field') || el.parentElement;
+  const e = holder.querySelector('.field-error'); if (e) e.remove();
+}
+
+/* Loading State: โครงร่างกะพริบ (skeleton) ระหว่างรอโหลดหน้า */
+function skeletonView(){
+  const card = (w1,w2,w3)=>`<div class="card" style="margin-bottom:14px">
+    <div class="skeleton sk-line" style="width:${w1}"></div>
+    <div class="skeleton sk-line" style="width:${w2}"></div>
+    <div class="skeleton sk-line" style="width:${w3}"></div>
+  </div>`;
+  return `<div class="view">${card('34%','72%','55%')}${card('46%','64%','38%')}</div>`;
 }
 function confirmModal(title, sub, okLabel, onOk){
   const host = $('modalHost');

@@ -386,6 +386,20 @@ tbody tr:hover { background: #FAFCFB; }
 .sk-line { height: 15px; margin-bottom: 12px; }
 .sk-line:last-child { margin-bottom: 0; }
 
+/* Loading State ระหว่างบันทึก/ลบ: overlay ทับจอ กันกดซ้ำ */
+.busy-ovl {
+  position: fixed; inset: 0; z-index: 120;
+  display: grid; place-items: center;
+  background: rgba(41,70,64,.22); backdrop-filter: blur(2px);
+  animation: rise .15s ease;
+}
+.busy-box {
+  display: flex; align-items: center; gap: 12px;
+  background: #fff; border-radius: 16px; padding: 18px 26px;
+  box-shadow: var(--shadow-lg); font-weight: 600; color: var(--ink);
+}
+.busy-box .spinner { width: 22px; height: 22px; }
+
 /* ---------- Modal ---------- */
 .modal-host { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(41,70,64,.32); backdrop-filter: blur(3px); animation: rise .2s ease; }
 .modal {

@@ -1573,7 +1573,11 @@ function rowBooking(b){
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case||'—')}</td>
     <td>${esc(b.supervisor||'—')}</td>
-    <td>${b.bi_account?`<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>`:(b.bi_count?`<span style="color:var(--muted)">ขอ ${esc(String(b.bi_count))}</span>`:'<span style="color:var(--muted)">—</span>')}</td>
+    <td>${b.bi_account
+      ? `<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>${b.bi_count?`<div style="font-size:.75rem;color:var(--muted)">ขอ ${esc(String(b.bi_count))} บัญชี</div>`:''}`
+      : (b.bi_count
+        ? `<span class="badge pending">ขอ ${esc(String(b.bi_count))} บัญชี</span>`
+        : '<span style="color:var(--muted)">—</span>')}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td><div class="row-actions">${act}</div></td>

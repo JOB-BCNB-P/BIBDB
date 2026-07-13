@@ -748,14 +748,18 @@ Views._smineRender = function(m, d){
 
 App.cancelMine = function(id){
   confirmModal('ยกเลิกการจอง', 'ต้องการยกเลิกการจองนี้ใช่หรือไม่?', 'ยกเลิกการจอง', async ()=>{
+    busy('กำลังยกเลิกการจอง…');
     const r = await api('cancelBooking', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
+    busyDone();
     if (r.error) return toast(r.error,'err');
     invalidateData();
-    toast('ยกเลิกการจองแล้ว','ok'); App.go(State.view);
+    toast('ยกเลิกการจองเรียบร้อยแล้ว','ok'); App.go(State.view);
   });
 };
 App.checkIn = async function(id){
+  busy('กำลังเช็คอิน…');
   const r = await api('checkIn', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
+  busyDone();
   if (r.error) return toast(r.error,'err');
   invalidateData();
   toast('เช็คอินเรียบร้อย ✅','ok'); App.go(State.view);
@@ -1026,29 +1030,37 @@ App.asnToggleList = function(){
 App.confirmApprove = async function(id){
   const ids = Array.from(document.querySelectorAll('.asnck')).filter(c=>c.checked).map(c=>c.value);
   App._closeModal();
+  busy('กำลังบันทึกการอนุมัติ…');
   const r = await api('updateStatus', { booking_id:id, status:'approved', actor_id:State.user.user_id, bi_accounts: ids });
+  busyDone();
   if (r.error) return toast(r.error,'err');
   invalidateData();
-  toast(ids.length?('อนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'อนุมัติแล้ว','ok');
+  toast(ids.length?('บันทึกการอนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'บันทึกการอนุมัติแล้ว','ok');
   App.go(State.view);
 };
 App.reject = function(id){
   if (!isAdmin()) return toast('การปฏิเสธทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   confirmModal('ปฏิเสธการจอง','ต้องการปฏิเสธการจองนี้ใช่หรือไม่?','ปฏิเสธ', async ()=>{
+    busy('กำลังบันทึก…');
     const r = await api('updateStatus', { booking_id:id, status:'rejected', actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ปฏิเสธแล้ว','ok'); App.go(State.view);
+    busyDone();
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกการปฏิเสธแล้ว','ok'); App.go(State.view);
   });
 };
 App.teacherCancel = function(id){
   confirmModal('ยกเลิกการจอง','ยืนยันยกเลิกการจองรายการนี้?','ยกเลิก', async ()=>{
+    busy('กำลังยกเลิกการจอง…');
     const r = await api('cancelBooking', { booking_id:id, role:State.user.role, user_id:State.user.user_id, actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ยกเลิกแล้ว','ok'); App.go(State.view);
+    busyDone();
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ยกเลิกการจองเรียบร้อยแล้ว','ok'); App.go(State.view);
   });
 };
 App.adminDelete = function(id){
   confirmModal('ลบการจองถาวร','ลบรายการจองนี้ออกจากระบบอย่างถาวร? การกระทำนี้ย้อนกลับไม่ได้','ลบถาวร', async ()=>{
+    busy('กำลังลบรายการ…');
     const r = await api('deleteBooking', { booking_id:id, role:'admin', actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบรายการแล้ว','ok'); App.go(State.view);
+    busyDone();
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบรายการเรียบร้อยแล้ว','ok'); App.go(State.view);
   });
 };
 
@@ -1154,7 +1166,7 @@ App.saveSettings = async function(){
   State.settings = r.settings;
   Cache.set('v:settings', r.settings);
   invalidateData(); // เวลาเปิด-ปิด/จำนวนเครื่อง กระทบปฏิทินและความว่าง
-  toast('บันทึกการตั้งค่าแล้ว','ok');
+  toast('บันทึกการตั้งค่าเรียบร้อยแล้ว','ok');
 };
 
 /* =========================================================
@@ -1367,27 +1379,35 @@ Views.biAdd = async function(){
   if (!username){ fieldError('biUser','กรุณากรอก username'); bad = true; }
   if (!password){ fieldError('biPass','กรุณากรอกรหัสผ่าน'); bad = true; }
   if (bad) return;
+  busy('กำลังบันทึกบัญชีใหม่…');
   const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password, account_type });
-  if (r.error) return toast(r.error,'err'); invalidateData(); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
+  busyDone();
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกบัญชีใหม่แล้ว','ok'); App.go('tbi');
 };
 Views.biRequest = async function(id){
   const r = await api('requestBIAccount', { account_id:id, user_id:State.user.user_id, name:State.user.name, role:State.user.role });
   if (r.error) return toast(r.error,'err'); invalidateData(); toast('ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ','ok'); App.go('tbi');
 };
 Views.biApprove = async function(id){
+  busy('กำลังบันทึกการอนุมัติ…');
   const r = await api('approveBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
-  if (r.error) return toast(r.error,'err'); invalidateData(); toast('อนุมัติแล้ว','ok'); App.go('tbi');
+  busyDone();
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกการอนุมัติแล้ว','ok'); App.go('tbi');
 };
 Views.biRelease = function(id){
   confirmModal('คืนบัญชี','ปล่อยบัญชีนี้กลับเป็นสถานะว่าง?','คืนบัญชี', async ()=>{
+    busy('กำลังคืนบัญชี…');
     const r = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('คืนบัญชีแล้ว','ok'); App.go('tbi');
+    busyDone();
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('คืนบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
   });
 };
 Views.biDelete = function(id){
   confirmModal('ลบบัญชี','ลบบัญชี BI นี้ถาวร?','ลบ', async ()=>{
+    busy('กำลังลบบัญชี…');
     const r = await api('deleteBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบบัญชีแล้ว','ok'); App.go('tbi');
+    busyDone();
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
   });
 };
 
@@ -1688,6 +1708,15 @@ function clearFieldError(id){
   const holder = el.closest('.field') || el.parentElement;
   const e = holder.querySelector('.field-error'); if (e) e.remove();
 }
+
+/* Loading State ระหว่างบันทึก/ลบ: overlay ทับจอ กันกดซ้ำ + บอกสถานะ
+   ใช้คู่กัน: busy('กำลังบันทึก…') → เรียก API → busyDone() → toast ผลลัพธ์ */
+function busy(msg){
+  let h = $('busyHost');
+  if (!h){ h = document.createElement('div'); h.id = 'busyHost'; document.body.appendChild(h); }
+  h.innerHTML = `<div class="busy-ovl"><div class="busy-box"><span class="spinner"></span><span>${esc(msg||'กำลังบันทึก…')}</span></div></div>`;
+}
+function busyDone(){ const h = $('busyHost'); if (h) h.innerHTML = ''; }
 
 /* Loading State: โครงร่างกะพริบ (skeleton) ระหว่างรอโหลดหน้า */
 function skeletonView(){

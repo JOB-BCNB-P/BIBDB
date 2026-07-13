@@ -386,6 +386,31 @@ tbody tr:hover { background: #FAFCFB; }
 .sk-line { height: 15px; margin-bottom: 12px; }
 .sk-line:last-child { margin-bottom: 0; }
 
+/* ---------- รายงาน: กราฟแท่งจัดอันดับผู้ใช้งาน ---------- */
+.rep-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.vchart {
+  display: flex; align-items: flex-end; gap: 14px;
+  height: 250px; overflow-x: auto; padding: 6px 4px 0;
+}
+.vbar {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  height: 100%; min-width: 62px; flex: none; cursor: default;
+}
+.vbar-val { font-weight: 800; font-size: .86rem; color: var(--ink); margin-bottom: 4px; }
+.vbar-col {
+  width: 32px; min-height: 6px; border-radius: 9px 9px 4px 4px;
+  background: linear-gradient(180deg, var(--mint-deep), var(--mint-soft));
+  transition: transform .12s;
+}
+.vbar:hover .vbar-col { transform: scaleX(1.15); }
+.vbar-col.teacher { background: linear-gradient(180deg, var(--sky, #5AA9D6), var(--mint-soft)); }
+.vbar-col.other { background: linear-gradient(180deg, var(--warn), var(--warn-soft)); }
+.vbar-name {
+  margin-top: 7px; font-size: .68rem; color: var(--muted); text-align: center;
+  max-width: 76px; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
 /* Loading State ระหว่างบันทึก/ลบ: overlay ทับจอ กันกดซ้ำ */
 .busy-ovl {
   position: fixed; inset: 0; z-index: 120;

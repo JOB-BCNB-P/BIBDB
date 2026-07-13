@@ -926,23 +926,33 @@ function cacheBookings(list){
   (list||[]).forEach(b=>{ State._bkCache[b.booking_id] = b; });
 }
 
-/* ---------- อนุมัติ (ผู้ดูแลระบบเท่านั้น) + จ่ายบัญชี BI ---------- */
+/* ---------- อนุมัติ (ผู้ดูแลระบบเท่านั้น) + จ่ายบัญชี BI ----------
+   - กด +/− เลือกจำนวน → ระบบติ๊กบัญชีว่างให้อัตโนมัติ
+     (ประเภทเดียวกับผู้จองก่อน แล้วจึงอีกประเภท)
+   - หรือกด "เลือกบัญชีเอง" เพื่อเปิดรายการสวิตช์เลื่อน (scroll ได้) */
 App.approve = async function(id){
   if (!isAdmin()) return toast('การอนุมัติทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   const b = State._bkCache[id];
   const r = await api('getBIAccounts', { role:'admin', user_id:State.user.user_id });
   const accounts = (r.accounts||[]);
   const avail = accounts.filter(a=>a.status==='available');
+
+  // ลำดับการเลือกอัตโนมัติ: บัญชีประเภทเดียวกับผู้จองก่อน
+  const prefType = (b && b.role==='student') ? 'student' : 'teacher';
+  App._asnPool = avail.filter(a=>a.account_type===prefType)
+    .concat(avail.filter(a=>a.account_type!==prefType))
+    .map(a=>String(a.account_id));
+
+  const sw = a => `
+    <label class="asn-item">
+      <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
+      <span class="topbar-spacer"></span>
+      <span class="sw"><input type="checkbox" class="asnck" value="${esc(a.account_id)}" onchange="App.asnSync()" /><span class="sw-track"></span></span>
+    </label>`;
   const group = (type, label)=>{
     const items = avail.filter(a=>a.account_type===type);
     if (!items.length) return '';
-    return `<div class="asn-group"><div class="asn-head">${label}</div>
-      ${items.map(a=>`
-        <label class="asn-item">
-          <input type="checkbox" class="asnck" value="${esc(a.account_id)}" />
-          <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
-        </label>`).join('')}
-    </div>`;
+    return `<div class="asn-group"><div class="asn-head">${label} (${items.length})</div>${items.map(sw).join('')}</div>`;
   };
   const info = b ? `<div class="asn-bk">
       <b>${esc(b.name)}</b> · ${fmtThaiShort(b.date)} · ${esc(b.start_time)}–${esc(b.end_time)}
@@ -950,17 +960,61 @@ App.approve = async function(id){
       ${b.bi_count?`<span class="badge pending">ขอบัญชี BI ${esc(String(b.bi_count))} บัญชี</span>`:''}
       ${b.group_members?`<div class="help">กลุ่ม: ${esc(b.group_members)}</div>`:''}
     </div>` : '';
+
   openModal(`
     <div class="asn">
       <h3 style="margin-bottom:6px">อนุมัติการจอง</h3>
       ${info}
-      <p class="modal-sub" style="margin-bottom:10px">เลือกบัญชี BI (user) ที่จะจ่ายให้ผู้จอง — เลือกได้หลายบัญชีเมื่อกลุ่มมีหลายคน หรือไม่เลือกก็ได้</p>
-      ${avail.length ? (group('teacher','บัญชีอาจารย์') + group('student','บัญชีนักศึกษา')) : '<div class="dd-empty" style="padding:8px 0">ไม่มีบัญชี BI ว่างในขณะนี้</div>'}
+      ${avail.length ? `
+      <div class="asn-count">
+        <div>
+          <b>จำนวนบัญชี BI ที่จะจ่าย</b>
+          <div class="help">ระบบเลือกจากบัญชีว่าง ${avail.length} บัญชีให้อัตโนมัติ</div>
+          ${b && b.supervisor ? `<div class="help">บัญชีนักศึกษา → แสดงที่ผู้จอง · บัญชีอาจารย์ → แสดงที่ <b>${esc(b.supervisor)}</b></div>` : ''}
+        </div>
+        <div class="stepper">
+          <button type="button" onclick="App.asnStep(-1)" aria-label="ลดจำนวน">−</button>
+          <span id="asnCount">0</span>
+          <button type="button" onclick="App.asnStep(1)" aria-label="เพิ่มจำนวน">+</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="asnListBtn" onclick="App.asnToggleList()">▾ เลือกบัญชีเอง / ดูรายการบัญชี</button>
+      <div id="asnList" class="asn-scroll hidden">
+        ${group('teacher','บัญชีอาจารย์')}${group('student','บัญชีนักศึกษา')}
+      </div>` : '<div class="dd-empty" style="padding:8px 0">ไม่มีบัญชี BI ว่างในขณะนี้</div>'}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
         <button class="btn btn-primary" onclick="App.confirmApprove('${esc(id)}')">${svg(I.check)}อนุมัติ</button>
       </div>
     </div>`);
+
+  // ติ๊กให้อัตโนมัติเท่าจำนวนที่ผู้จองขอ (ไม่เกินบัญชีว่างที่มี)
+  const want = Math.min((b && b.bi_count) || 0, avail.length);
+  for (let i=0; i<want; i++) App.asnStep(1);
+};
+
+/* กด + / − : ติ๊ก/เอาออกตามลำดับบัญชีใน pool */
+App.asnStep = function(d){
+  const boxes = (App._asnPool||[]).map(v=>document.querySelector('.asnck[value="'+v+'"]')).filter(Boolean);
+  if (d > 0){
+    const nxt = boxes.find(c=>!c.checked);
+    if (!nxt) return toast('บัญชีว่างถูกเลือกครบแล้ว','err');
+    nxt.checked = true;
+  } else {
+    const on = boxes.filter(c=>c.checked);
+    if (on.length) on[on.length-1].checked = false;
+  }
+  App.asnSync();
+};
+App.asnSync = function(){
+  const el = $('asnCount');
+  if (el) el.textContent = document.querySelectorAll('.asnck:checked').length;
+};
+App.asnToggleList = function(){
+  const list = $('asnList'), btn = $('asnListBtn');
+  if (!list) return;
+  list.classList.toggle('hidden');
+  if (btn) btn.textContent = list.classList.contains('hidden') ? '▾ เลือกบัญชีเอง / ดูรายการบัญชี' : '▴ ซ่อนรายการบัญชี';
 };
 App.confirmApprove = async function(id){
   const ids = Array.from(document.querySelectorAll('.asnck')).filter(c=>c.checked).map(c=>c.value);

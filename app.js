@@ -1090,18 +1090,24 @@ Views._treportRender = function(m, d){
   const maxC = Math.max(1, ...cases.map(c=>c.count));
   const pgC = paginate('rep_c', cases);
 
-  // ตัวเลือกปี พ.ศ. (ปีปัจจุบันย้อนหลัง 4 ปี)
-  const nowBE = new Date().getFullYear() + 543;
-  const year = State._repYear || 'all';
+  // ตัวเลือกปี พ.ศ. — แสดงเฉพาะปีที่มีข้อมูลจริงในระบบ
+  let year = State._repYear || 'all';
+  const dataYears = (rp.years||[]).slice();
+  if (year !== 'all' && dataYears.indexOf(parseInt(year,10)) === -1){
+    year = 'all'; State._repYear = 'all'; // ปีที่เลือกไว้ไม่มีข้อมูลแล้ว → กลับไปดูทุกปี
+  }
   const yearOpts = ['<option value="all"'+(year==='all'?' selected':'')+'>ทุกปี</option>']
-    .concat(Array.from({length:5},(_,i)=>nowBE-i).map(y=>
+    .concat(dataYears.map(y=>
       `<option value="${y}" ${String(year)===String(y)?'selected':''}>พ.ศ. ${y}</option>`)).join('');
 
-  // แยกกลุ่มผู้ใช้: อาจารย์ / นักศึกษา / อื่นๆ
-  const role = State._repRole || 'student';
+  // แยกกลุ่มผู้ใช้: แสดงเฉพาะกลุ่มที่มีข้อมูลจริง
   const roleOf = u => (u.role==='teacher' ? 'teacher' : (u.role==='student' ? 'student' : 'other'));
+  const roleLabel = { teacher:'อาจารย์', student:'นักศึกษา', other:'อื่นๆ' };
+  const availRoles = ['teacher','student','other'].filter(v=>users.some(u=>roleOf(u)===v));
+  let role = State._repRole || 'student';
+  if (availRoles.indexOf(role) === -1 && availRoles.length) role = availRoles[0];
   const inRole = users.filter(u=>roleOf(u)===role);
-  const roleChip = (val,label)=>`<button class="chip ${role===val?'active':''}" onclick="Views.repRole('${val}')">${label} (${users.filter(u=>roleOf(u)===val).length})</button>`;
+  const roleChip = val=>`<button class="chip ${role===val?'active':''}" onclick="Views.repRole('${val}')">${roleLabel[val]} (${users.filter(u=>roleOf(u)===val).length})</button>`;
 
   // กราฟแท่ง (แสดงสูงสุด 20 อันดับแรก เลื่อนดูได้)
   const maxU = Math.max(1, ...inRole.map(u=>u.count));
@@ -1122,12 +1128,12 @@ Views._treportRender = function(m, d){
           <div class="section-head" style="margin-bottom:10px"><h3>จัดอันดับผู้ใช้งาน</h3></div>
           <div class="rep-tools">
             <select class="input" style="max-width:150px" onchange="Views.repYear(this.value)">${yearOpts}</select>
-            <div class="chips">${roleChip('teacher','อาจารย์')}${roleChip('student','นักศึกษา')}${roleChip('other','อื่นๆ')}</div>
+            <div class="chips">${availRoles.map(roleChip).join('')}</div>
           </div>
           ${inRole.length
             ? `<div class="vchart">${bars}</div>
                <div class="help" style="margin-top:8px">${svg(I.info)} ชี้ที่แท่งเพื่อดูรายละเอียดเคสที่ฝึก · แสดงสูงสุด 20 อันดับ (เลื่อนดูด้านข้างได้)</div>`
-            : emptyState('📊','ยังไม่มีข้อมูลกลุ่มนี้','ลองเปลี่ยนปี หรือเลือกกลุ่มอื่น')}
+            : emptyState('📊','ยังไม่มีข้อมูลการใช้งาน','')}
         </div>
         <div class="card">
           <h3 style="margin-bottom:14px">เคส/หัวข้อที่ฝึกบ่อย</h3>

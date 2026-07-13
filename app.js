@@ -1067,35 +1067,67 @@ App.adminDelete = function(id){
   });
 };
 
-/* ---------- อาจารย์/ผู้ดูแล: รายงาน ---------- */
+/* ---------- อาจารย์/ผู้ดูแล: รายงาน ----------
+   จัดอันดับผู้ใช้งานเป็นกราฟแท่ง เลือกดูตามปี พ.ศ. และแยกกลุ่ม อาจารย์/นักศึกษา/อื่นๆ */
 Views.treport = async function(m){
-  await viewSWR('v:treport', async ()=>{
-    const rp = await api('getReport', {});
+  const year = State._repYear || 'all';
+  let params = {};
+  if (year !== 'all'){
+    const ce = parseInt(year,10) - 543; // พ.ศ. → ค.ศ.
+    params = { from: ce+'-01-01', to: ce+'-12-31' };
+  }
+  await viewSWR('v:treport:'+year, async ()=>{
+    const rp = await api('getReport', params);
     return { rp, __err: !!rp.error };
   }, (d)=>Views._treportRender(m, d));
 };
+Views.repYear = function(v){ State._repYear = v; App.go('treport'); };
+Views.repRole = function(v){ State._repRole = v; App.go('treport'); };
+
 Views._treportRender = function(m, d){
   const rp = d.rp || {};
   const users = rp.by_user||[]; const cases = rp.by_case||[];
-  const maxU = Math.max(1, ...users.map(u=>u.count));
   const maxC = Math.max(1, ...cases.map(c=>c.count));
-  const pgU = paginate('rep_u', users);
   const pgC = paginate('rep_c', cases);
+
+  // ตัวเลือกปี พ.ศ. (ปีปัจจุบันย้อนหลัง 4 ปี)
+  const nowBE = new Date().getFullYear() + 543;
+  const year = State._repYear || 'all';
+  const yearOpts = ['<option value="all"'+(year==='all'?' selected':'')+'>ทุกปี</option>']
+    .concat(Array.from({length:5},(_,i)=>nowBE-i).map(y=>
+      `<option value="${y}" ${String(year)===String(y)?'selected':''}>พ.ศ. ${y}</option>`)).join('');
+
+  // แยกกลุ่มผู้ใช้: อาจารย์ / นักศึกษา / อื่นๆ
+  const role = State._repRole || 'student';
+  const roleOf = u => (u.role==='teacher' ? 'teacher' : (u.role==='student' ? 'student' : 'other'));
+  const inRole = users.filter(u=>roleOf(u)===role);
+  const roleChip = (val,label)=>`<button class="chip ${role===val?'active':''}" onclick="Views.repRole('${val}')">${label} (${users.filter(u=>roleOf(u)===val).length})</button>`;
+
+  // กราฟแท่ง (แสดงสูงสุด 20 อันดับแรก เลื่อนดูได้)
+  const maxU = Math.max(1, ...inRole.map(u=>u.count));
+  const bars = inRole.slice(0,20).map(u=>`
+    <div class="vbar" title="${esc(u.name)} · ${u.count} ครั้ง · ${u.cases.map(c=>esc(c.case)+' ('+c.count+')').join(', ')}">
+      <span class="vbar-val">${u.count}</span>
+      <span class="vbar-col ${role}" style="height:${Math.max(6, Math.round(u.count/maxU*100))}%"></span>
+      <span class="vbar-name">${esc(u.name)}</span>
+    </div>`).join('');
+
   m.innerHTML = `
     <div class="view">
-      <div class="section-head"><h2>รายงานสรุปการใช้งาน</h2><span class="hint">รวม ${rp.total||0} ครั้ง</span>
+      <div class="section-head"><h2>รายงานสรุปการใช้งาน</h2><span class="hint">รวม ${rp.total||0} ครั้ง${year!=='all'?' · พ.ศ. '+esc(String(year)):''}</span>
         <span class="topbar-spacer"></span>
         <button class="btn btn-ghost btn-sm" onclick="App.exportReport()">${svg(I.dl)}Export CSV</button></div>
       <div class="grid cols-2">
         <div class="card">
-          <h3 style="margin-bottom:14px">จัดอันดับผู้ใช้งาน</h3>
-          ${users.length ? pgU.slice.map(u=>`
-            <div style="margin-bottom:14px">
-              <div style="display:flex;justify-content:space-between;font-size:.9rem;margin-bottom:5px">
-                <b>${esc(u.name)}</b><span style="color:var(--muted)">${u.count} ครั้ง</span></div>
-              <div class="report-bar"><span style="width:${Math.round(u.count/maxU*100)}%"></span></div>
-              <div class="help">${u.cases.map(c=>esc(c.case)+' ('+c.count+')').join(' · ')}</div>
-            </div>`).join('') + pgU.html : emptyState('📊','ยังไม่มีข้อมูล','')}
+          <div class="section-head" style="margin-bottom:10px"><h3>จัดอันดับผู้ใช้งาน</h3></div>
+          <div class="rep-tools">
+            <select class="input" style="max-width:150px" onchange="Views.repYear(this.value)">${yearOpts}</select>
+            <div class="chips">${roleChip('teacher','อาจารย์')}${roleChip('student','นักศึกษา')}${roleChip('other','อื่นๆ')}</div>
+          </div>
+          ${inRole.length
+            ? `<div class="vchart">${bars}</div>
+               <div class="help" style="margin-top:8px">${svg(I.info)} ชี้ที่แท่งเพื่อดูรายละเอียดเคสที่ฝึก · แสดงสูงสุด 20 อันดับ (เลื่อนดูด้านข้างได้)</div>`
+            : emptyState('📊','ยังไม่มีข้อมูลกลุ่มนี้','ลองเปลี่ยนปี หรือเลือกกลุ่มอื่น')}
         </div>
         <div class="card">
           <h3 style="margin-bottom:14px">เคส/หัวข้อที่ฝึกบ่อย</h3>

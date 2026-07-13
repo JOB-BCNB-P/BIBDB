@@ -322,7 +322,10 @@ const App = {
   },
 
   logout(){
-    confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', ()=>{
+    confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', async ()=>{
+      busy('กำลังออกจากระบบ…');
+      // บันทึก logout ลงชีต Logs ก่อนล้าง session
+      try { await api('logout', { user_id: State.user.user_id, role: State.user.role }); } catch(e){}
       clearSession(); Cache.wipe(); location.reload();  // ล้างข้อมูลแคช กันข้อมูลค้างข้ามผู้ใช้
     });
   },

@@ -438,7 +438,7 @@ Views._sdashRender = function(m, d){
       <div class="grid cols-3" style="margin-bottom:18px">
         ${stat('mint', I.book, upcoming.length, 'คิวที่กำลังจะถึง')}
         ${stat('warn', I.clock, pendingCount, 'รออนุมัติ')}
-        ${stat('sky', I.pulse, freeToday, 'User ว่างวันนี้')}
+        ${stat('sky', I.pulse, freeToday, 'User นักศึกษาว่างวันนี้')}
       </div>
 
       <div class="card">
@@ -885,7 +885,7 @@ Views._tdashRender = function(m, d){
       <div class="grid cols-4" style="margin-bottom:18px">
         ${stat('mint', I.book, st.bookings_today||0, 'การจองวันนี้')}
         ${stat('warn', I.clock, st.pending||0, 'รออนุมัติ')}
-        ${stat('sky', I.pulse, st.free_bi_today||0, 'User ว่างวันนี้')}
+        ${stat('sky', I.pulse, st.free_bi_today||0, 'User นักศึกษาว่างวันนี้')}
         ${stat('blush', I.report, st.weekly_total||0, 'การใช้งาน 7 วัน')}
       </div>
       <div class="card">
@@ -1309,7 +1309,18 @@ Views._tbiRender = function(m, d){
               ? 'บัญชีกลุ่มอาจารย์ · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ'
               : 'บัญชีกลุ่มนักศึกษา · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ')}</span></div>
 
-      ${admin ? `<div class="card" style="margin-bottom:16px">
+      ${admin ? `
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <b style="margin-right:4px">สรุปสถานะบัญชี:</b>
+          <span class="badge approved">นักศึกษาว่าง ${list.filter(a=>a.status==='available'&&a.account_type==='student').length}</span>
+          <span class="badge approved">อาจารย์ว่าง ${list.filter(a=>a.status==='available'&&a.account_type==='teacher').length}</span>
+          <span class="badge in">ใช้งานอยู่ ${list.filter(a=>a.status==='approved').length}</span>
+          <span class="badge pending">รออนุมัติ ${list.filter(a=>a.status==='pending').length}</span>
+          <span class="hint">· รวม ${list.length} บัญชี — การ์ด "User นักศึกษาว่างวันนี้" นับเฉพาะบัญชีนักศึกษาที่ว่าง</span>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
         <h3 style="margin-bottom:12px">เพิ่มบัญชีใหม่</h3>
         <div class="grid cols-3">
           <div class="field"><label for="biUser">Username (BI)</label><input class="input" id="biUser" placeholder="เช่น bcnb-bi-05" /></div>

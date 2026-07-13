@@ -1318,6 +1318,8 @@ Views._tbiRender = function(m, d){
           <span class="badge in">ใช้งานอยู่ ${list.filter(a=>a.status==='approved').length}</span>
           <span class="badge pending">รออนุมัติ ${list.filter(a=>a.status==='pending').length}</span>
           <span class="hint">· รวม ${list.length} บัญชี — การ์ด "User นักศึกษาว่างวันนี้" นับเฉพาะบัญชีนักศึกษาที่ว่าง</span>
+          <span class="topbar-spacer"></span>
+          <button class="btn btn-warn btn-sm" onclick="Views.biBulkRelease()">${svg(I.key)}คืนบัญชี</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
@@ -1408,6 +1410,64 @@ Views.biApprove = async function(id){
   busyDone();
   if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกการอนุมัติแล้ว','ok'); App.go('tbi');
 };
+/* ---------- คืนบัญชีแบบเลือกหลาย user (admin) ---------- */
+Views.biBulkRelease = function(){
+  const inUse = (State._biList||[]).filter(a=>a.status!=='available');
+  if (!inUse.length) return toast('ทุกบัญชีว่างอยู่แล้ว ไม่มีบัญชีที่ต้องคืน','ok');
+  const item = a => `
+    <label class="asn-item">
+      <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
+      <span class="hint" style="font-size:.78rem">${esc(a.holder_name||'—')}</span>
+      ${biStatusBadge(a.status)}
+      <span class="topbar-spacer"></span>
+      <span class="sw"><input type="checkbox" class="rlck" value="${esc(a.account_id)}" onchange="Views.rlSync()" /><span class="sw-track"></span></span>
+    </label>`;
+  openModal(`
+    <div class="asn">
+      <h3 style="margin-bottom:6px">คืนบัญชี BI</h3>
+      <p class="modal-sub" style="margin-bottom:10px">เลือกบัญชีที่ต้องการคืนเป็นสถานะ "ว่าง" — มี ${inUse.length} บัญชีที่ถูกใช้งาน/รออนุมัติ</p>
+      <label class="asn-item" style="border-style:dashed">
+        <b>เลือกทั้งหมด</b>
+        <span class="topbar-spacer"></span>
+        <span class="sw"><input type="checkbox" onchange="Views.rlAll(this.checked)" /><span class="sw-track"></span></span>
+      </label>
+      <div class="asn-scroll">${inUse.map(item).join('')}</div>
+      <div class="modal-actions" style="margin-top:14px">
+        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
+        <button class="btn btn-warn" onclick="Views.rlConfirm()">คืนบัญชี (<span id="rlCount">0</span>)</button>
+      </div>
+    </div>`);
+};
+Views.rlAll = function(on){
+  document.querySelectorAll('.rlck').forEach(c=>{ c.checked = on; });
+  Views.rlSync();
+};
+Views.rlSync = function(){
+  const el = $('rlCount');
+  if (el) el.textContent = document.querySelectorAll('.rlck:checked').length;
+};
+Views.rlConfirm = async function(){
+  const ids = Array.from(document.querySelectorAll('.rlck:checked')).map(c=>c.value);
+  if (!ids.length) return toast('ยังไม่ได้เลือกบัญชีที่จะคืน','err');
+  App._closeModal();
+  busy('กำลังคืนบัญชี '+ids.length+' บัญชี…');
+  let r = await api('releaseBIAccounts', { account_ids: ids, role:State.user.role, user_id:State.user.user_id });
+  // เผื่อเซิร์ฟเวอร์ยังเป็นเวอร์ชันเก่า: คืนทีละบัญชี
+  if (r && r.error && String(r.error).indexOf('ไม่รู้จัก') !== -1){
+    let ok = 0;
+    for (const id of ids){
+      const x = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
+      if (x && !x.error) ok++;
+    }
+    r = { ok:true, released: ok };
+  }
+  busyDone();
+  if (r.error) return toast(r.error,'err');
+  invalidateData();
+  toast('คืนบัญชีเรียบร้อยแล้ว '+(r.released!=null?r.released:ids.length)+' บัญชี','ok');
+  App.go('tbi');
+};
+
 Views.biRelease = function(id){
   confirmModal('คืนบัญชี','ปล่อยบัญชีนี้กลับเป็นสถานะว่าง?','คืนบัญชี', async ()=>{
     busy('กำลังคืนบัญชี…');

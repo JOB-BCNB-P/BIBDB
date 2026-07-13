@@ -356,7 +356,12 @@ tbody tr:hover { background: #FAFCFB; }
 
 /* ---------- Modal ---------- */
 .modal-host { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(41,70,64,.32); backdrop-filter: blur(3px); animation: rise .2s ease; }
-.modal { background: #fff; border-radius: 24px; box-shadow: var(--shadow-lg); width: 100%; max-width: 460px; padding: 26px; }
+.modal {
+  background: #fff; border-radius: 24px; box-shadow: var(--shadow-lg);
+  width: 100%; max-width: 460px; padding: 26px;
+  max-height: 88vh; overflow-y: auto; /* เนื้อหายาวเกินจอ → เลื่อนดูใน popup ได้ */
+  overscroll-behavior: contain;
+}
 .modal h3 { margin-bottom: 6px; }
 .modal .modal-sub { color: var(--muted); font-size: .88rem; margin-bottom: 18px; }
 .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
@@ -752,6 +757,39 @@ body.app-blurred .secure {
 }
 .asn-item:hover { background: var(--mint-soft); }
 .asn-item:has(input:checked) { background: var(--mint-soft); border-color: var(--mint-deep); }
-.asn-item input { accent-color: var(--mint-deep); width: 16px; height: 16px; }
+
+/* แถบเลือกจำนวนบัญชี (ปุ่ม + / −) */
+.asn-count {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: #F8FBFA; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+}
+.asn-count b { font-size: .95rem; color: var(--ink); }
+.stepper { display: flex; align-items: center; gap: 4px; flex: none; }
+.stepper button {
+  width: 40px; height: 40px; border: none; border-radius: 11px;
+  background: var(--mint-soft); color: var(--mint-deep);
+  font-size: 1.35rem; font-weight: 700; cursor: pointer; line-height: 1;
+  transition: background .15s, color .15s;
+}
+.stepper button:hover { background: var(--mint-deep); color: #fff; }
+.stepper span { min-width: 46px; text-align: center; font-size: 1.25rem; font-weight: 800; color: var(--ink); }
+
+/* รายการบัญชีแบบเลื่อนดู (scroll) */
+.asn-scroll { max-height: 300px; overflow-y: auto; margin-top: 10px; padding-right: 4px; }
+
+/* สวิตช์เลื่อน (toggle switch) */
+.sw { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; }
+.sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+.sw-track {
+  position: absolute; inset: 0; border-radius: 999px;
+  background: #DCE4E1; transition: background .15s;
+}
+.sw-track::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s;
+}
+.sw input:checked + .sw-track { background: var(--mint-deep); }
+.sw input:checked + .sw-track::after { left: 21px; }
 .asn-user { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: .92rem; }
 .asn-user svg { width: 16px; height: 16px; color: var(--mint-deep); }

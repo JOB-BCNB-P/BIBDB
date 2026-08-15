@@ -65,6 +65,7 @@ const I = {
   doc:'<path d="M6 3h7l5 5v13H6z"'+F+'/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
   ext:'<path d="M5 5h6v2H7v10h10v-4h2v6H5z"'+F+'/><path d="M5 5h6v2H7v10h10v-4h2v6H5z"/><path d="M14 5h5v5M19 5l-7 7"/>',
   grid:'<rect x="3" y="3" width="7" height="7" rx="2.2"'+F+'/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"'+F+'/><rect x="3" y="3" width="7" height="7" rx="2.2"/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"/>',
+  lock:'<rect x="4.5" y="10.5" width="15" height="10.5" rx="3"'+F+'/><rect x="4.5" y="10.5" width="15" height="10.5" rx="3"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15.4" r="1.5"'+D+'/><path d="M12 16.6v1.8"/>',
 };
 function svg(path, cls){ return '<svg '+(cls?'class="'+cls+'" ':'')+'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+path+'</svg>'; }
 
@@ -321,6 +322,64 @@ const App = {
     await App.enterApp();
   },
 
+  /* ===== ลืมรหัสผ่าน (อาจารย์ / ผู้ดูแล) — OTP + ตั้งรหัสใหม่ ===== */
+  forgotPassword(){
+    App._fpEmail = '';
+    openModal(`
+      <h3 style="display:flex;align-items:center;gap:8px">${svg(I.lock)} ลืมรหัสผ่าน</h3>
+      <p class="modal-sub">สำหรับอาจารย์และผู้ดูแลระบบ — กรอกอีเมลเพื่อรับรหัส OTP สำหรับตั้งรหัสผ่านใหม่</p>
+      <div id="fpStep1">
+        <div class="field">
+          <label for="fpEmail">อีเมล</label>
+          <input class="input" id="fpEmail" type="email" placeholder="name@bcnbangkok.ac.th" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary btn-block" onclick="App.fpRequest()">ส่งรหัส OTP</button>
+      </div>
+      <div id="fpStep2" class="hidden">
+        <div class="field">
+          <label for="fpOtp">รหัส OTP (6 หลัก)</label>
+          <input class="input" id="fpOtp" inputmode="numeric" maxlength="6" placeholder="กรอกรหัสที่ส่งไปอีเมล" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="fpNew">รหัสผ่านใหม่ (อย่างน้อย 8 ตัว มีตัวอักษร+ตัวเลข)</label>
+          <input class="input" id="fpNew" type="password" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="fpConfirm">ยืนยันรหัสผ่านใหม่</label>
+          <input class="input" id="fpConfirm" type="password" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-primary btn-block" onclick="App.fpConfirm()">ตั้งรหัสผ่านใหม่</button>
+      </div>
+    `);
+  },
+  async fpRequest(){
+    const btn = event.target;
+    const email = $('fpEmail').value.trim();
+    if (!email) return fieldError('fpEmail','กรุณากรอกอีเมล');
+    setLoading(btn, true);
+    const r = await api('forgotPasswordRequest', { email });
+    setLoading(btn, false, 'ส่งรหัส OTP');
+    if (r.error) return toast(r.error, 'err');
+    App._fpEmail = email;
+    toast(r.message || 'หากอีเมลอยู่ในระบบ จะได้รับรหัส OTP', 'ok', { duration:5500 });
+    $('fpStep1').classList.add('hidden');
+    $('fpStep2').classList.remove('hidden');
+  },
+  async fpConfirm(){
+    const btn = event.target;
+    const otp = $('fpOtp').value.trim(), np = $('fpNew').value, cf = $('fpConfirm').value;
+    if (!/^\d{6}$/.test(otp)) return fieldError('fpOtp','กรอกรหัส OTP 6 หลัก');
+    if (np.length < 8) return fieldError('fpNew','รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
+    if (!/[A-Za-z]/.test(np) || !/[0-9]/.test(np)) return fieldError('fpNew','ต้องมีทั้งตัวอักษรและตัวเลข');
+    if (np !== cf) return fieldError('fpConfirm','รหัสผ่านยืนยันไม่ตรงกัน');
+    setLoading(btn, true);
+    const r = await api('forgotPasswordConfirm', { email: App._fpEmail, otp, new_password: np });
+    setLoading(btn, false, 'ตั้งรหัสผ่านใหม่');
+    if (r.error) return toast(r.error, 'err');
+    App._closeModal();
+    alertDialog('สำเร็จ', r.message || 'ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว', 'ok', 'เข้าสู่ระบบ');
+  },
+
   logout(){
     confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', async ()=>{
       busy('กำลังออกจากระบบ…');
@@ -372,6 +431,7 @@ const App = {
         ['tbi', I.key, 'บัญชี BI'],
         ['treport', I.report, 'รายงาน'],
         ['tsettings', I.gear, 'ตั้งค่า'],
+        ['tchpwd', I.lock, 'เปลี่ยนรหัสผ่าน'],
       ];
     } else if (role==='teacher'){
       items = [
@@ -382,6 +442,7 @@ const App = {
         ['tscenarios', I.grid, 'Scenarios'],
         ['tbi', I.key, 'บัญชี BI'],
         ['treport', I.report, 'รายงาน'],
+        ['tchpwd', I.lock, 'เปลี่ยนรหัสผ่าน'],
       ];
     } else {
       items = [
@@ -1210,6 +1271,55 @@ App.saveSettings = async function(){
   toast('บันทึกการตั้งค่าเรียบร้อยแล้ว','ok');
 };
 
+/* ===== เปลี่ยนรหัสผ่าน (อาจารย์/ผู้ดูแล · ต้องยืนยัน OTP ทุกครั้ง) ===== */
+Views.tchpwd = async function(m){
+  m.innerHTML = `
+    <div class="view">
+      <div class="section-head"><h2>เปลี่ยนรหัสผ่าน</h2><span class="hint">ยืนยันตัวตนด้วยรหัส OTP ที่ส่งไปยังอีเมลของคุณทุกครั้ง</span></div>
+      <div class="card" style="max-width:520px">
+        <div class="field">
+          <label for="cpNew">รหัสผ่านใหม่</label>
+          <input class="input" id="cpNew" type="password" autocomplete="new-password" placeholder="อย่างน้อย 8 ตัว มีตัวอักษร+ตัวเลข" />
+        </div>
+        <div class="field">
+          <label for="cpConfirm">ยืนยันรหัสผ่านใหม่</label>
+          <input class="input" id="cpConfirm" type="password" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="cpOtp">รหัส OTP (6 หลัก)</label>
+          <div style="display:flex;gap:8px">
+            <input class="input" id="cpOtp" inputmode="numeric" maxlength="6" placeholder="กดปุ่มด้านขวาเพื่อรับรหัส" autocomplete="off" style="flex:1" />
+            <button class="btn btn-soft" onclick="App.chpwdRequestOtp()">${svg(I.info)}ขอรหัส OTP</button>
+          </div>
+          <div class="help">ระบบจะส่งรหัส OTP ไปยังอีเมลที่ผูกกับบัญชีของคุณ (ใช้ได้ 10 นาที)</div>
+        </div>
+        <button class="btn btn-primary" onclick="App.chpwdConfirm()">${svg(I.check)}บันทึกรหัสผ่านใหม่</button>
+      </div>
+    </div>`;
+};
+App.chpwdRequestOtp = async function(){
+  const btn = event.target.closest('button');
+  setLoading(btn, true);
+  const r = await api('changePasswordRequestOtp', { actor_id: State.user.user_id });
+  setLoading(btn, false, `${svg(I.info)}ขอรหัส OTP`);
+  if (r.error) return toast(r.error, 'err');
+  toast(r.message || 'ส่งรหัส OTP ไปที่อีเมลของคุณแล้ว', 'ok', { duration:5500 });
+};
+App.chpwdConfirm = async function(){
+  const btn = event.target.closest('button');
+  const np = $('cpNew').value, cf = $('cpConfirm').value, otp = $('cpOtp').value.trim();
+  if (np.length < 8) return fieldError('cpNew','รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
+  if (!/[A-Za-z]/.test(np) || !/[0-9]/.test(np)) return fieldError('cpNew','ต้องมีทั้งตัวอักษรและตัวเลข');
+  if (np !== cf) return fieldError('cpConfirm','รหัสผ่านยืนยันไม่ตรงกัน');
+  if (!/^\d{6}$/.test(otp)) return fieldError('cpOtp','กรอกรหัส OTP 6 หลัก');
+  setLoading(btn, true);
+  const r = await api('changePassword', { actor_id: State.user.user_id, otp, new_password: np });
+  setLoading(btn, false, `${svg(I.check)}บันทึกรหัสผ่านใหม่`);
+  if (r.error) return toast(r.error, 'err');
+  $('cpNew').value=''; $('cpConfirm').value=''; $('cpOtp').value='';
+  alertDialog('สำเร็จ', r.message || 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว', 'ok', 'ตกลง');
+};
+
 /* =========================================================
    COMPONENTS (HTML builders)
    ========================================================= */
@@ -2018,6 +2128,25 @@ const MockAPI = (function(){
         if (p.open_time!==undefined) settings.open_time = p.open_time;
         if (p.close_time!==undefined) settings.close_time = p.close_time;
         return { settings: JSON.parse(JSON.stringify(settings)) };
+      }
+      /* ===== โหมดทดลอง: ลืม/เปลี่ยนรหัสผ่าน (OTP ทดสอบคือ 123456) ===== */
+      case 'forgotPasswordRequest':
+        return { ok:true, message:'(โหมดทดลอง) หากอีเมลอยู่ในระบบ จะได้รับ OTP — ใช้รหัสทดสอบ 123456' };
+      case 'forgotPasswordConfirm': {
+        if (String(p.otp)!=='123456') return { error:'รหัส OTP ไม่ถูกต้อง (โหมดทดลองใช้ 123456)' };
+        if (String(p.new_password||'').length<8) return { error:'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
+        const u = users.find(x=>x.email && x.email.toLowerCase()===String(p.email||'').toLowerCase() && (x.role==='teacher'||x.role==='admin'));
+        if (u) u.password = p.new_password;
+        return { ok:true, message:'(โหมดทดลอง) ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว' };
+      }
+      case 'changePasswordRequestOtp':
+        return { ok:true, message:'(โหมดทดลอง) ส่ง OTP แล้ว — ใช้รหัสทดสอบ 123456' };
+      case 'changePassword': {
+        if (String(p.otp)!=='123456') return { error:'รหัส OTP ไม่ถูกต้อง (โหมดทดลองใช้ 123456)' };
+        if (String(p.new_password||'').length<8) return { error:'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
+        const u = users.find(x=>x.user_id===String(p.actor_id));
+        if (u) u.password = p.new_password;
+        return { ok:true, message:'(โหมดทดลอง) เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' };
       }
       case 'getBookings': {
         let list = bookings.slice();

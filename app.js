@@ -1130,6 +1130,17 @@ App.confirmApprove = async function(id){
   toast(ids.length?('บันทึกการอนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'บันทึกการอนุมัติแล้ว','ok');
   App.go(State.view);
 };
+App.completeBooking = function(id){
+  if (!isAdmin()) return toast('ปิดการจองทำได้โดยผู้ดูแลระบบเท่านั้น','err');
+  confirmModal('ปิดการจอง (เสร็จสิ้น)','ยืนยันปิดการจองนี้เป็น "เสร็จสิ้น"? ระบบจะคืนบัญชี BI ที่จ่ายไว้ให้ว่างอัตโนมัติ','เสร็จสิ้น', async ()=>{
+    busy('กำลังปิดการจอง…');
+    const r = await api('updateStatus', { booking_id:id, status:'completed', actor_id:State.user.user_id });
+    busyDone();
+    if (r.error) return toast(r.error,'err');
+    State._biAccounts = null;   // บัญชีถูกคืน → ล้างแคช
+    invalidateData(); toast('ปิดการจองเรียบร้อย · คืนบัญชีให้ว่างแล้ว','ok'); App.go(State.view);
+  });
+};
 App.reject = function(id){
   if (!isAdmin()) return toast('การปฏิเสธทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   confirmModal('ปฏิเสธการจอง','ต้องการปฏิเสธการจองนี้ใช่หรือไม่?','ปฏิเสธ', async ()=>{
@@ -1832,6 +1843,7 @@ function teacherBookingCard(b){
       ${admin && b.status==='pending' ? `<button class="btn btn-primary btn-sm" onclick="App.approve('${b.booking_id}')">${svg(I.check)}อนุมัติ</button>
       <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}ปฏิเสธ</button>` : ''}
       ${!admin && b.status==='pending' ? `<span class="help">รอผู้ดูแลระบบอนุมัติ</span>` : ''}
+      ${admin && b.status==='approved' ? `<button class="btn btn-primary btn-sm" onclick="App.completeBooking('${b.booking_id}')">${svg(I.check)}เสร็จสิ้น (คืนบัญชี)</button>` : ''}
       ${b.status==='approved' ? `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>` : ''}
       ${admin ? `<button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')">${svg(I.x)}ลบถาวร</button>` : ''}
     </div>
@@ -1847,7 +1859,8 @@ function rowBooking(b){
          <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}</button>`
       : '<span style="color:var(--muted)">รอผู้ดูแล</span>';
   } else if (b.status==='approved'){
-    act = `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
+    act = (admin ? `<button class="btn btn-primary btn-sm" onclick="App.completeBooking('${b.booking_id}')" title="ปิดการจอง + คืนบัญชี">${svg(I.check)}เสร็จสิ้น</button> ` : '')
+        + `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
   } else { act = '<span style="color:var(--muted)">—</span>'; }
   if (admin)
     act += ` <button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')" title="ลบถาวร">${svg(I.x)}</button>`;
@@ -2259,6 +2272,11 @@ const MockAPI = (function(){
         const b = bookings.find(x=>x.booking_id===p.booking_id);
         if (!b) return { error:'ไม่พบการจองนี้' };
         b.status = p.status; if (p.note!==undefined) b.note=p.note;
+        if (p.status==='completed'){
+          const names = String(b.bi_account||'').split(',').map(x=>x.trim()).filter(Boolean);
+          biAccounts.forEach(a=>{ if (names.indexOf(a.username)!==-1){ a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString(); } });
+          b.bi_account='';
+        }
         if (p.status==='approved' && p.bi_accounts && p.bi_accounts.length){
           const names=[];
           p.bi_accounts.forEach(id=>{

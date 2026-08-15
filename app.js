@@ -569,12 +569,8 @@ Views._slotsRender = function(dateISO, d){
   const scnList = ((Views._scnCache||{}).scenarios)||[];
   State._avail = av;
   Views._members = [];
-
-  const scnOptions = scnList.map(s=>{
-    const label = (s.no? s.no+' · ':'') + s.title + (s.level? ' ('+s.level+')':'');
-    const val = (s.no? s.no+' · ':'') + s.title;
-    return `<option value="${esc(val)}">${esc(label)}</option>`;
-  }).join('');
+  Views._scnSel = [];          // เคสที่เลือกไว้ (เลือกได้หลายเคส)
+  Views._scnAll = scnList;
 
   // รายชื่ออาจารย์ (ผู้สอน/ผู้ควบคุม) — ถ้าอาจารย์เป็นผู้จอง เลือกตัวเองให้อัตโนมัติ
   const teacherOpts = (Views._userCache||[]).filter(u=>u.role==='teacher').map(t=>
@@ -627,11 +623,14 @@ Views._slotsRender = function(dateISO, d){
     <div id="bookForm">
       <div class="grid cols-2">
         <div class="field">
-          <label for="bkCase">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios)</label>
-          <select class="input" id="bkCase">
-            <option value="">— เลือก Scenario —</option>
-            ${scnOptions}
-          </select>
+          <label for="bkScnSearch">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios · เลือกได้หลายเคส)</label>
+          <div class="member-picker" id="scnPicker">
+            <div id="bkScnChips" class="member-chips"></div>
+            <input class="input" id="bkScnSearch" placeholder="พิมพ์ชื่อ/เลขเคสเพื่อค้นหา แล้วกดเลือก…" autocomplete="off"
+                   oninput="Views.scnSearch2(this.value)" onfocus="Views.scnSearch2(this.value)" />
+            <div id="bkScnList" class="member-list hidden"></div>
+          </div>
+          <div class="help">เลือกได้มากกว่าหนึ่งเคส</div>
         </div>
         <div class="field">
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
@@ -756,13 +755,52 @@ Views.renderMemberChips = function(){
   const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
 };
 
+/* ---------- เลือก Scenario ได้หลายเคส (ค้นหาจากรายการ) ---------- */
+Views._scnSel = [];
+Views.scnSearch2 = function(q){
+  const list = $('bkScnList'); if (!list) return;
+  q = String(q||'').trim().toLowerCase();
+  const pool = (Views._scnAll||[]).map((s,i)=>({s,i})).filter(({s,i})=>
+    !Views._scnSel.some(x=>x.i===i) &&
+    (!q || (String(s.no||'')+' '+String(s.title||'')+' '+String(s.level||'')).toLowerCase().includes(q))
+  );
+  list.innerHTML = pool.length
+    ? pool.slice(0,8).map(({s,i})=>`
+        <button type="button" class="member-opt" onclick="Views.addScn(${i})">
+          <span class="mo-name">${esc((s.no?s.no+' · ':'')+s.title)}</span>
+          <span class="mo-role">${esc(s.level||'')}</span>
+        </button>`).join('')
+    : '<div class="member-empty">ไม่พบเคสที่ค้นหา</div>';
+  list.classList.remove('hidden');
+};
+Views.addScn = function(i){
+  const s = (Views._scnAll||[])[i]; if (!s) return;
+  if (!Views._scnSel.some(x=>x.i===i)) Views._scnSel.push({ i, val:(s.no?s.no+' · ':'')+s.title });
+  const inp = $('bkScnSearch'); if (inp){ inp.value=''; inp.focus(); }
+  const l = $('bkScnList'); if (l) l.classList.add('hidden');
+  clearFieldError('bkScnSearch');
+  Views.renderScnChips();
+};
+Views.removeScn = function(i){
+  Views._scnSel = Views._scnSel.filter(x=>x.i!==i);
+  Views.renderScnChips();
+};
+Views.renderScnChips = function(){
+  const host = $('bkScnChips'); if (!host) return;
+  host.innerHTML = Views._scnSel.map(x=>`
+    <span class="member-chip teacher">
+      ${esc(x.val)}
+      <button type="button" onclick="Views.removeScn(${x.i})" aria-label="ลบเคส">&times;</button>
+    </span>`).join('');
+};
+
 Views.submitBooking = async function(){
   const start = $('bkStart') && $('bkStart').value;
   const end = $('bkEnd') && $('bkEnd').value;
   // ตรวจครบทุกช่องก่อน แล้วชี้จุดผิดใต้ช่องนั้นๆ (inline validation)
   let bad = false;
   if (!start || !end){ if ($('bkStart')) fieldError('bkStart','กรุณาเลือกช่วงเวลา'); bad = true; }
-  if (!$('bkCase').value){ fieldError('bkCase','กรุณาเลือก Scenario ที่จะฝึก'); bad = true; }
+  if (!Views._scnSel.length){ fieldError('bkScnSearch','กรุณาเลือก Scenario อย่างน้อย 1 เคส'); bad = true; }
   if (!$('bkTeacher').value){ fieldError('bkTeacher','กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม'); bad = true; }
   const size = parseInt($('bkSize').value,10);
   if (!size || size < 1){ fieldError('bkSize','ระบุจำนวนผู้เข้าฝึกอย่างน้อย 1 คน'); bad = true; }
@@ -774,7 +812,7 @@ Views.submitBooking = async function(){
   const r = await api('createBooking', {
     user_id: State.user.user_id, name: State.user.name, role: State.user.role,
     date: State.bookDate, start_time: start, end_time: end,
-    subject_case: $('bkCase').value,
+    subject_case: Views._scnSel.map(x=>x.val).join(', '),
     supervisor: $('bkTeacher').value,
     note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value,10)||1,
@@ -1022,13 +1060,7 @@ App.approve = async function(id){
     accounts = (r.accounts||[]);
     State._biAccounts = accounts; State._biAccountsAt = Date.now();
   }
-  const avail = accounts.filter(a=>a.status==='available');
-
-  // ลำดับการเลือกอัตโนมัติ: บัญชีประเภทเดียวกับผู้จองก่อน
-  const prefType = (b && b.role==='student') ? 'student' : 'teacher';
-  App._asnPool = avail.filter(a=>a.account_type===prefType)
-    .concat(avail.filter(a=>a.account_type!==prefType))
-    .map(a=>String(a.account_id));
+  const avail = accounts.filter(a=>a.status==='available');   // แสดงเฉพาะบัญชีที่ยังว่าง
 
   const sw = a => `
     <label class="asn-item">
@@ -1048,6 +1080,7 @@ App.approve = async function(id){
       ${b.group_members?`<div class="help">กลุ่ม: ${esc(b.group_members)}</div>`:''}
     </div>` : '';
 
+  const wantN = Math.min((b && b.bi_count) || 0, avail.length);   // จำนวนที่ขอ (แสดงเป็นเป้าหมาย)
   openModal(`
     <div class="asn">
       <h3 style="margin-bottom:6px">อนุมัติการจอง</h3>
@@ -1055,20 +1088,15 @@ App.approve = async function(id){
       ${avail.length ? `
       <div class="asn-count">
         <div>
-          <b>จำนวนบัญชี BI ที่จะจ่าย</b>
-          <div class="help">ระบบเลือกจากบัญชีว่าง ${avail.length} บัญชีให้อัตโนมัติ</div>
+          <b>เลือกบัญชี BI ที่จะจ่าย</b>
+          <div class="help">ผู้จองขอ <b>${wantN}</b> บัญชี · เลือกเองจากบัญชีที่ว่าง ${avail.length} บัญชี (เพิ่ม/ลดได้)</div>
           ${b && b.supervisor ? `<div class="help">บัญชีนักศึกษา → แสดงที่ผู้จอง · บัญชีอาจารย์ → แสดงที่ <b>${esc(b.supervisor)}</b></div>` : ''}
         </div>
-        <div class="stepper">
-          <button type="button" onclick="App.asnStep(-1)" aria-label="ลดจำนวน">−</button>
-          <input id="asnCount" type="number" min="0" max="${avail.length}" value="0" inputmode="numeric"
-                 onchange="App.asnSetCount(this.value)" onkeyup="if(event.key==='Enter')App.asnSetCount(this.value)" aria-label="จำนวนบัญชีที่จะจ่าย" />
-          <button type="button" onclick="App.asnStep(1)" aria-label="เพิ่มจำนวน">+</button>
-        </div>
+        <div class="asn-badge">เลือกแล้ว <span id="asnCount">0</span> / ${wantN}</div>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="asnListBtn" onclick="App.asnToggleList()">▾ เลือกบัญชีเอง / ดูรายการบัญชี</button>
-      <div id="asnList" class="asn-scroll hidden">
-        ${group('teacher','บัญชีอาจารย์')}${group('student','บัญชีนักศึกษา')}
+      <div class="help" style="margin:2px 0 8px">ติ๊กเลือกบัญชีที่ต้องการจ่าย (แสดงเฉพาะบัญชีที่ยังว่าง)</div>
+      <div id="asnList" class="asn-scroll">
+        ${group('teacher','บัญชีอาจารย์ (ว่าง)')}${group('student','บัญชีนักศึกษา (ว่าง)')}
       </div>` : '<div class="dd-empty" style="padding:8px 0">ไม่มีบัญชี BI ว่างในขณะนี้</div>'}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
@@ -1076,42 +1104,14 @@ App.approve = async function(id){
       </div>
     </div>`);
 
-  // ติ๊กให้อัตโนมัติเท่าจำนวนที่ผู้จองขอ (ไม่เกินบัญชีว่างที่มี)
-  const want = Math.min((b && b.bi_count) || 0, avail.length);
-  for (let i=0; i<want; i++) App.asnStep(1);
+  // ไม่ติ๊กบัญชีให้อัตโนมัติ — ให้ผู้อนุมัติเลือกบัญชีเอง (ตามที่กำหนด)
+  App.asnSync();
 };
 
-/* กด + / − : ติ๊ก/เอาออกตามลำดับบัญชีใน pool */
-App.asnStep = function(d){
-  const boxes = (App._asnPool||[]).map(v=>document.querySelector('.asnck[value="'+v+'"]')).filter(Boolean);
-  if (d > 0){
-    const nxt = boxes.find(c=>!c.checked);
-    if (!nxt) return toast('บัญชีว่างถูกเลือกครบแล้ว','err');
-    nxt.checked = true;
-  } else {
-    const on = boxes.filter(c=>c.checked);
-    if (on.length) on[on.length-1].checked = false;
-  }
-  App.asnSync();
-};
+/* อัปเดตตัวเลข "เลือกแล้ว N" ตามจำนวนบัญชีที่ติ๊ก */
 App.asnSync = function(){
   const el = $('asnCount');
-  if (el) el.value = document.querySelectorAll('.asnck:checked').length;
-};
-/* พิมพ์จำนวนได้เอง → ติ๊กบัญชีว่างให้ตรงจำนวน (ไม่เกินบัญชีที่มี) */
-App.asnSetCount = function(n){
-  const boxes = (App._asnPool||[]).map(v=>document.querySelector('.asnck[value="'+v+'"]')).filter(Boolean);
-  let want = parseInt(n, 10);
-  if (isNaN(want) || want < 0) want = 0;
-  if (want > boxes.length){ want = boxes.length; toast('มีบัญชีว่างเพียง '+boxes.length+' บัญชี','err'); }
-  boxes.forEach((c,i)=>{ c.checked = i < want; });
-  App.asnSync();
-};
-App.asnToggleList = function(){
-  const list = $('asnList'), btn = $('asnListBtn');
-  if (!list) return;
-  list.classList.toggle('hidden');
-  if (btn) btn.textContent = list.classList.contains('hidden') ? '▾ เลือกบัญชีเอง / ดูรายการบัญชี' : '▴ ซ่อนรายการบัญชี';
+  if (el) el.textContent = document.querySelectorAll('.asnck:checked').length;
 };
 App.confirmApprove = async function(id){
   const ids = Array.from(document.querySelectorAll('.asnck')).filter(c=>c.checked).map(c=>c.value);

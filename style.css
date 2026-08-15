@@ -841,6 +841,11 @@ body.app-blurred .secure {
   background: #F8FBFA; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
 }
 .asn-count b { font-size: .95rem; color: var(--ink); }
+.asn-badge {
+  flex: none; background: var(--mint-soft); color: var(--mint-deep);
+  font-weight: 800; font-size: .95rem; padding: 8px 14px; border-radius: 11px; white-space: nowrap;
+}
+.asn-badge span { font-size: 1.25rem; }
 .stepper { display: flex; align-items: center; gap: 4px; flex: none; }
 .stepper button {
   width: 40px; height: 40px; border: none; border-radius: 11px;

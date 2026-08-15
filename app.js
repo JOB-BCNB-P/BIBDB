@@ -327,7 +327,7 @@ const App = {
     App._fpEmail = '';
     openModal(`
       <h3 style="display:flex;align-items:center;gap:8px">${svg(I.lock)} ลืมรหัสผ่าน</h3>
-      <p class="modal-sub">สำหรับอาจารย์และผู้ดูแลระบบ — กรอกอีเมลเพื่อรับรหัส OTP สำหรับตั้งรหัสผ่านใหม่</p>
+      <p class="modal-sub">สำหรับบัญชีอาจารย์ — กรอกอีเมลเพื่อรับรหัส OTP สำหรับตั้งรหัสผ่านใหม่</p>
       <div id="fpStep1">
         <div class="field">
           <label for="fpEmail">อีเมล</label>
@@ -431,7 +431,6 @@ const App = {
         ['tbi', I.key, 'บัญชี BI'],
         ['treport', I.report, 'รายงาน'],
         ['tsettings', I.gear, 'ตั้งค่า'],
-        ['tchpwd', I.lock, 'เปลี่ยนรหัสผ่าน'],
       ];
     } else if (role==='teacher'){
       items = [
@@ -1272,8 +1271,12 @@ App.saveSettings = async function(){
   toast('บันทึกการตั้งค่าเรียบร้อยแล้ว','ok');
 };
 
-/* ===== เปลี่ยนรหัสผ่าน (อาจารย์/ผู้ดูแล · ต้องยืนยัน OTP ทุกครั้ง) ===== */
+/* ===== เปลี่ยนรหัสผ่าน (เฉพาะอาจารย์ · ต้องยืนยัน OTP ทุกครั้ง) ===== */
 Views.tchpwd = async function(m){
+  if (!State.user || State.user.role !== 'teacher'){
+    m.innerHTML = `<div class="view">${emptyState('🔒','ไม่พร้อมใช้งาน','ฟีเจอร์เปลี่ยนรหัสผ่านสำหรับบัญชีอาจารย์เท่านั้น')}</div>`;
+    return;
+  }
   m.innerHTML = `
     <div class="view">
       <div class="section-head"><h2>เปลี่ยนรหัสผ่าน</h2><span class="hint">ยืนยันตัวตนด้วยรหัส OTP ที่ส่งไปยังอีเมลของคุณทุกครั้ง</span></div>
@@ -2136,17 +2139,21 @@ const MockAPI = (function(){
       case 'forgotPasswordConfirm': {
         if (String(p.otp)!=='123456') return { error:'รหัส OTP ไม่ถูกต้อง (โหมดทดลองใช้ 123456)' };
         if (String(p.new_password||'').length<8) return { error:'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
-        const u = users.find(x=>x.email && x.email.toLowerCase()===String(p.email||'').toLowerCase() && (x.role==='teacher'||x.role==='admin'));
+        const u = users.find(x=>x.email && x.email.toLowerCase()===String(p.email||'').toLowerCase() && x.role==='teacher');
         if (u) u.password = p.new_password;
         return { ok:true, message:'(โหมดทดลอง) ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว' };
       }
-      case 'changePasswordRequestOtp':
+      case 'changePasswordRequestOtp': {
+        const u = users.find(x=>x.user_id===String(p.actor_id));
+        if (!u || u.role!=='teacher') return { error:'ฟีเจอร์นี้สำหรับบัญชีอาจารย์เท่านั้น' };
         return { ok:true, message:'(โหมดทดลอง) ส่ง OTP แล้ว — ใช้รหัสทดสอบ 123456' };
+      }
       case 'changePassword': {
+        const u = users.find(x=>x.user_id===String(p.actor_id));
+        if (!u || u.role!=='teacher') return { error:'ฟีเจอร์นี้สำหรับบัญชีอาจารย์เท่านั้น' };
         if (String(p.otp)!=='123456') return { error:'รหัส OTP ไม่ถูกต้อง (โหมดทดลองใช้ 123456)' };
         if (String(p.new_password||'').length<8) return { error:'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
-        const u = users.find(x=>x.user_id===String(p.actor_id));
-        if (u) u.password = p.new_password;
+        u.password = p.new_password;
         return { ok:true, message:'(โหมดทดลอง) เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' };
       }
       case 'getBookings': {

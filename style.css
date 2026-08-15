@@ -160,6 +160,7 @@ a { color: var(--sky-deep); }
 .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
 
 /* ---------- Stat cards ---------- */
 .stat {
@@ -459,7 +460,11 @@ tbody tr:hover { background: #FAFCFB; }
 .demo-banner svg { width: 16px; height: 16px; flex: none; }
 
 /* ---------- Responsive ---------- */
+@media (max-width: 1040px) {
+  .grid.cols-5 { grid-template-columns: repeat(3, 1fr); }
+}
 @media (max-width: 860px) {
+  .grid.cols-5 { grid-template-columns: repeat(2, 1fr); }
   .grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
   .grid.cols-3 { grid-template-columns: 1fr; }
   .grid.cols-2 { grid-template-columns: 1fr; }
@@ -470,6 +475,7 @@ tbody tr:hover { background: #FAFCFB; }
   .user-chip .who { display: none; }
   .user-chip { padding: 6px; }
   .grid.cols-4 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-5 { grid-template-columns: 1fr 1fr; }
   .stat .num { font-size: 1.4rem; }
   .main { padding: 16px 14px 50px; }
   .card { padding: 18px; }

@@ -637,9 +637,9 @@ Views._slotsRender = function(dateISO, d){
           <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
         </div>
         <div class="field">
-          <label for="bkBiCount">จำนวนเครื่อง / บัญชี BI ที่ต้องการใช้</label>
-          <input class="input" id="bkBiCount" type="number" min="0" max="20" value="1" />
-          <div class="help">ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติการจอง</div>
+          <label for="bkBiCount">จำนวนเครื่อง / บัญชี BI ที่ต้องการใช้ <span style="color:var(--danger)">*</span></label>
+          <input class="input" id="bkBiCount" type="number" min="1" max="20" value="1" required />
+          <div class="help">ต้องระบุอย่างน้อย 1 บัญชี · ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติ</div>
         </div>
       </div>
       <div class="field">
@@ -805,7 +805,7 @@ Views.submitBooking = async function(){
   const size = parseInt($('bkSize').value,10);
   if (!size || size < 1){ fieldError('bkSize','ระบุจำนวนผู้เข้าฝึกอย่างน้อย 1 คน'); bad = true; }
   const bic = parseInt($('bkBiCount') && $('bkBiCount').value, 10);
-  if ($('bkBiCount') && (isNaN(bic) || bic < 0)){ fieldError('bkBiCount','จำนวนต้องเป็น 0 ขึ้นไป'); bad = true; }
+  if ($('bkBiCount') && (isNaN(bic) || bic < 1)){ fieldError('bkBiCount','กรุณาระบุจำนวนบัญชี BI อย่างน้อย 1'); bad = true; }
   if (bad) return toast('กรุณากรอกข้อมูลให้ครบถ้วน', 'err');
   const btn = event.target;
   setLoading(btn, true);
@@ -1025,7 +1025,7 @@ Views._tbookingsRender = function(m, d){
         <button class="btn btn-ghost btn-sm" onclick="App.exportCSV()">${svg(I.dl)}Export CSV</button></div>
       <div class="card">
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">
-          ${filterBtn('all','ทั้งหมด')}${filterBtn('pending','รออนุมัติ')}${filterBtn('approved','อนุมัติแล้ว')}${filterBtn('rejected','ปฏิเสธ')}${filterBtn('cancelled','ยกเลิก')}
+          ${filterBtn('all','ทั้งหมด')}${filterBtn('pending','รออนุมัติ')}${filterBtn('approved','อนุมัติแล้ว')}${filterBtn('completed','เสร็จสิ้น')}${filterBtn('rejected','ปฏิเสธ')}${filterBtn('cancelled','ยกเลิก')}
         </div>
         ${filtered.length ? `
         <div class="table-wrap"><table>
@@ -1772,7 +1772,7 @@ function stat(color, icon, num, label){
   return `<div class="stat ${color}"><div class="ico">${svg(icon)}</div><div><div class="num">${num}</div><div class="lab">${label}</div></div></div>`;
 }
 function statusBadge(s){
-  const map = {pending:'รออนุมัติ', approved:'อนุมัติแล้ว', rejected:'ปฏิเสธ', cancelled:'ยกเลิก'};
+  const map = {pending:'รออนุมัติ', approved:'อนุมัติแล้ว', rejected:'ปฏิเสธ', cancelled:'ยกเลิก', completed:'เสร็จสิ้น'};
   return `<span class="badge ${s}">${map[s]||s}</span>`;
 }
 function dowLabel(k){ return {mon:'จันทร์',tue:'อังคาร',wed:'พุธ',thu:'พฤหัสบดี',fri:'ศุกร์',sat:'เสาร์',sun:'อาทิตย์'}[k]||k; }
@@ -2112,6 +2112,19 @@ const MockAPI = (function(){
   function activeOf(date){
     return bookings.filter(b=>b.date===date && (b.status==='pending'||b.status==='approved'));
   }
+  // คืนบัญชีแล้วถอดออกจากการจอง — ถ้าไม่เหลือบัญชี → ปิดเป็น completed
+  function completeBookings(freed){
+    if (!freed || !freed.length) return;
+    bookings.forEach(b=>{
+      if (b.status!=='approved') return;
+      const names = String(b.bi_account||'').split(',').map(x=>x.trim()).filter(Boolean);
+      if (!names.length) return;
+      const remaining = names.filter(n=>!freed.some(f=>f.username===n && f.holder_id===String(b.user_id)));
+      if (remaining.length===names.length) return;
+      b.bi_account = remaining.join(', ');
+      if (!remaining.length) b.status='completed';
+    });
+  }
   function steps(date){
     const day = activeOf(date);
     const out = [];
@@ -2211,6 +2224,8 @@ const MockAPI = (function(){
         if (sM%STEP_MIN!==0 || eM%STEP_MIN!==0) return { error:'เวลาต้องลงตัวเป็นช่วงละ '+STEP_MIN+' นาที' };
         if (sM<t2m(settings.open_time) || eM>t2m(settings.close_time)) return { error:'จองได้ระหว่าง '+settings.open_time+' – '+settings.close_time+' เท่านั้น' };
         if (eM-sM > settings.max_duration*60) return { error:'จองได้ไม่เกิน '+settings.max_duration+' ชั่วโมงต่อครั้ง' };
+        const biReq = parseInt(p.bi_count,10);
+        if (isNaN(biReq) || biReq < 1) return { error:'กรุณาระบุจำนวนบัญชี BI ที่ต้องการอย่างน้อย 1 บัญชี' };
         const day = activeOf(date);
         const dup = day.find(b=>b.user_id===String(p.user_id)&&overlaps(sM,eM,t2m(b.start_time),t2m(b.end_time)));
         if (dup) return { error:'คุณมีการจองที่คาบเกี่ยวช่วงเวลานี้อยู่แล้ว' };
@@ -2221,7 +2236,7 @@ const MockAPI = (function(){
         const rec = { booking_id:'BK'+(1000+seq++), user_id:String(p.user_id), name:p.name, role:p.role||'student',
           date, start_time:start, end_time:end, station_no:station, subject_case:p.subject_case||'',
           supervisor:p.supervisor||'',
-          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', bi_account:'',
+          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', bi_count:biReq, bi_account:'',
           status:'pending', checked_in:'no', created_at:new Date().toISOString(), note:String(p.note||'') };
         bookings.push(rec);
         return { booking: JSON.parse(JSON.stringify(rec)) };
@@ -2306,19 +2321,23 @@ const MockAPI = (function(){
         const a = biAccounts.find(x=>x.account_id===p.account_id);
         if (!a) return { error:'ไม่พบบัญชีนี้' };
         if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return { error:'คืนได้เฉพาะบัญชีของตัวเอง' };
+        const freed = [{ holder_id:String(a.holder_id||''), username:String(a.username||'') }];
         a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
+        completeBookings(freed);
         return { ok:true };
       }
       case 'releaseBIAccounts': {
         const ids = Array.isArray(p.account_ids) ? p.account_ids : String(p.account_ids||'').split(',').map(x=>x.trim()).filter(Boolean);
-        let released = 0;
+        let released = 0; const freed = [];
         ids.forEach(id=>{
           const a = biAccounts.find(x=>x.account_id===id);
           if (!a) return;
           if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return;
+          freed.push({ holder_id:String(a.holder_id||''), username:String(a.username||'') });
           a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
           released++;
         });
+        completeBookings(freed);
         return { ok:true, released };
       }
       case 'deleteBIAccount': {

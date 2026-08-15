@@ -232,6 +232,7 @@ textarea.input { resize: vertical; min-height: 76px; }
 .badge.rejected  { background: var(--danger-soft);color: var(--danger); }
 .badge.cancelled { background: #EEF1F0; color: #93A3A0; }
 .badge.in { background: var(--sky-soft); color: var(--sky-deep); }
+.badge.completed { background: var(--sky-soft); color: var(--sky-deep); }
 
 /* ---------- Table ---------- */
 .table-wrap { overflow-x: auto; border-radius: var(--radius-sm); }

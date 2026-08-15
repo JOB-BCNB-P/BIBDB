@@ -850,6 +850,15 @@ body.app-blurred .secure {
 }
 .stepper button:hover { background: var(--mint-deep); color: #fff; }
 .stepper span { min-width: 46px; text-align: center; font-size: 1.25rem; font-weight: 800; color: var(--ink); }
+.stepper input {
+  width: 58px; height: 40px; text-align: center;
+  font-size: 1.2rem; font-weight: 800; color: var(--ink);
+  border: 1.5px solid var(--line, #d7dce2); border-radius: 11px; background: #fff;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.stepper input:focus { outline: none; border-color: var(--mint-deep); }
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 /* รายการบัญชีแบบเลื่อนดู (scroll) */
 .asn-scroll { max-height: 300px; overflow-y: auto; margin-top: 10px; padding-right: 4px; }

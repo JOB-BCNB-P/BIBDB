@@ -436,7 +436,7 @@ const App = {
       items = [
         ['tdash', I.dash, 'ภาพรวม'],
         ['sbook', I.plus, 'จองคิว'],
-        ['tbookings', I.list, 'การจองทั้งหมด'],
+        ['tbookings', I.list, 'การจองของฉัน'],
         ['tcal', I.cal, 'ปฏิทิน'],
         ['tscenarios', I.grid, 'Scenarios'],
         ['tbi', I.key, 'บัญชี BI'],
@@ -961,13 +961,17 @@ Views._tdashRender = function(m, d){
 /* ---------- อาจารย์/ผู้ดูแล: การจองทั้งหมด ---------- */
 Views.tbookings = async function(m){
   State._tFilter = State._tFilter || 'all';
-  await viewSWR('v:tbookings', async ()=>{
-    const bk = await api('getBookings', {});
+  // อาจารย์/นักศึกษาเห็นเฉพาะการจองของตนเอง · ผู้ดูแลระบบเห็นทั้งหมด
+  const mineOnly = !isAdmin();
+  const key = mineOnly ? ('v:tbookings:'+State.user.user_id) : 'v:tbookings';
+  await viewSWR(key, async ()=>{
+    const bk = await api('getBookings', mineOnly ? { user_id: State.user.user_id } : {});
     return { bk, __err: !!bk.error };
   }, (d)=>Views._tbookingsRender(m, d));
 };
 Views._tbookingsRender = function(m, d){
   const bk = d.bk || {};
+  const mineOnly = !isAdmin();
   let list = (bk.bookings||[]).sort((a,b)=>(b.date+b.start_time).localeCompare(a.date+a.start_time));
   const f = State._tFilter;
   const filtered = f==='all' ? list : list.filter(b=>b.status===f);
@@ -978,7 +982,7 @@ Views._tbookingsRender = function(m, d){
 
   m.innerHTML = `
     <div class="view">
-      <div class="section-head"><h2>การจองทั้งหมด</h2><span class="hint">${filtered.length} รายการ</span>
+      <div class="section-head"><h2>${mineOnly?'การจองของฉัน':'การจองทั้งหมด'}</h2><span class="hint">${filtered.length} รายการ</span>
         <span class="topbar-spacer"></span>
         <button class="btn btn-ghost btn-sm" onclick="App.exportCSV()">${svg(I.dl)}Export CSV</button></div>
       <div class="card">
@@ -1008,8 +1012,16 @@ function cacheBookings(list){
 App.approve = async function(id){
   if (!isAdmin()) return toast('การอนุมัติทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   const b = State._bkCache[id];
-  const r = await api('getBIAccounts', { role:'admin', user_id:State.user.user_id });
-  const accounts = (r.accounts||[]);
+  // ใช้แคชบัญชีในหน่วยความจำ (อายุ 30 วิ) → เปิดหน้าอนุมัติรายถัดไปได้ทันทีไม่ต้องโหลดซ้ำ
+  let accounts;
+  if (State._biAccounts && (Date.now() - (State._biAccountsAt||0) < 30000)){
+    accounts = State._biAccounts;
+  } else {
+    const r = await api('getBIAccounts', { role:'admin', user_id:State.user.user_id });
+    if (r.error) return toast(r.error,'err');
+    accounts = (r.accounts||[]);
+    State._biAccounts = accounts; State._biAccountsAt = Date.now();
+  }
   const avail = accounts.filter(a=>a.status==='available');
 
   // ลำดับการเลือกอัตโนมัติ: บัญชีประเภทเดียวกับผู้จองก่อน
@@ -1049,7 +1061,8 @@ App.approve = async function(id){
         </div>
         <div class="stepper">
           <button type="button" onclick="App.asnStep(-1)" aria-label="ลดจำนวน">−</button>
-          <span id="asnCount">0</span>
+          <input id="asnCount" type="number" min="0" max="${avail.length}" value="0" inputmode="numeric"
+                 onchange="App.asnSetCount(this.value)" onkeyup="if(event.key==='Enter')App.asnSetCount(this.value)" aria-label="จำนวนบัญชีที่จะจ่าย" />
           <button type="button" onclick="App.asnStep(1)" aria-label="เพิ่มจำนวน">+</button>
         </div>
       </div>
@@ -1083,7 +1096,16 @@ App.asnStep = function(d){
 };
 App.asnSync = function(){
   const el = $('asnCount');
-  if (el) el.textContent = document.querySelectorAll('.asnck:checked').length;
+  if (el) el.value = document.querySelectorAll('.asnck:checked').length;
+};
+/* พิมพ์จำนวนได้เอง → ติ๊กบัญชีว่างให้ตรงจำนวน (ไม่เกินบัญชีที่มี) */
+App.asnSetCount = function(n){
+  const boxes = (App._asnPool||[]).map(v=>document.querySelector('.asnck[value="'+v+'"]')).filter(Boolean);
+  let want = parseInt(n, 10);
+  if (isNaN(want) || want < 0) want = 0;
+  if (want > boxes.length){ want = boxes.length; toast('มีบัญชีว่างเพียง '+boxes.length+' บัญชี','err'); }
+  boxes.forEach((c,i)=>{ c.checked = i < want; });
+  App.asnSync();
 };
 App.asnToggleList = function(){
   const list = $('asnList'), btn = $('asnListBtn');
@@ -1098,6 +1120,12 @@ App.confirmApprove = async function(id){
   const r = await api('updateStatus', { booking_id:id, status:'approved', actor_id:State.user.user_id, bi_accounts: ids });
   busyDone();
   if (r.error) return toast(r.error,'err');
+  // อัปเดตแคชบัญชีในหน่วยความจำ (ไม่ต้องดึงใหม่) → อนุมัติรายถัดไปเร็ว
+  if (State._biAccounts){
+    const set = {}; ids.forEach(x=>set[String(x)]=1);
+    State._biAccounts.forEach(a=>{ if (set[String(a.account_id)]) a.status='approved'; });
+    State._biAccountsAt = Date.now();
+  }
   invalidateData();
   toast(ids.length?('บันทึกการอนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'บันทึกการอนุมัติแล้ว','ok');
   App.go(State.view);
@@ -1550,7 +1578,7 @@ Views.biAdd = async function(){
   busy('กำลังบันทึกบัญชีใหม่…');
   const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password, account_type });
   busyDone();
-  if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกบัญชีใหม่แล้ว','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('บันทึกบัญชีใหม่แล้ว','ok'); App.go('tbi');
 };
 Views.biRequest = async function(id){
   const r = await api('requestBIAccount', { account_id:id, user_id:State.user.user_id, name:State.user.name, role:State.user.role });
@@ -1560,7 +1588,7 @@ Views.biApprove = async function(id){
   busy('กำลังบันทึกการอนุมัติ…');
   const r = await api('approveBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
   busyDone();
-  if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกการอนุมัติแล้ว','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('บันทึกการอนุมัติแล้ว','ok'); App.go('tbi');
 };
 /* ---------- คืนบัญชีแบบเลือกหลาย user (admin) ---------- */
 Views.biBulkRelease = function(){
@@ -1615,6 +1643,7 @@ Views.rlConfirm = async function(){
   }
   busyDone();
   if (r.error) return toast(r.error,'err');
+  State._biAccounts = null;   // ล้างแคชบัญชีในหน่วยความจำ (สถานะเปลี่ยน)
   invalidateData();
   toast('คืนบัญชีเรียบร้อยแล้ว '+(r.released!=null?r.released:ids.length)+' บัญชี','ok');
   App.go('tbi');
@@ -1625,7 +1654,7 @@ Views.biRelease = function(id){
     busy('กำลังคืนบัญชี…');
     const r = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
     busyDone();
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('คืนบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
+    if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('คืนบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
   });
 };
 Views.biDelete = function(id){
@@ -1633,7 +1662,7 @@ Views.biDelete = function(id){
     busy('กำลังลบบัญชี…');
     const r = await api('deleteBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
     busyDone();
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
+    if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('ลบบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
   });
 };
 
@@ -2279,6 +2308,18 @@ const MockAPI = (function(){
         if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return { error:'คืนได้เฉพาะบัญชีของตัวเอง' };
         a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
         return { ok:true };
+      }
+      case 'releaseBIAccounts': {
+        const ids = Array.isArray(p.account_ids) ? p.account_ids : String(p.account_ids||'').split(',').map(x=>x.trim()).filter(Boolean);
+        let released = 0;
+        ids.forEach(id=>{
+          const a = biAccounts.find(x=>x.account_id===id);
+          if (!a) return;
+          if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return;
+          a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
+          released++;
+        });
+        return { ok:true, released };
       }
       case 'deleteBIAccount': {
         if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };

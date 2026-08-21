@@ -1,107 +1,163 @@
 <!DOCTYPE html>
 <html lang="th">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2333a08f' d='M12 21C6.5 16.5 3 13.2 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4C13.1 5.4 14.7 4.5 16.4 4.5 18.8 4.5 21 6.3 21 9.2c0 4-3.5 7.3-9 11.8z'/%3E%3C/svg%3E" />
   <title>ระบบจอง Body Interact – วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ</title>
   <meta name="description" content="ระบบกำกับติดตามการจองเข้าใช้งานโปรแกรม Body Interact สำหรับการเรียนการสอน" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
   <link rel="stylesheet" href="style.css?v=20260815b" />
 </head>
+
 <body>
   <!-- ====== หน้าล็อกอิน ====== -->
   <div id="loginView" class="login-wrap">
     <div class="login-grid">
       <div class="login-card">
-      <div class="login-brand">
-        <div class="logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7H16l-1.7-2.5L11.6 14 9.8 10.6l-1 1.5H6.3" fill="#fff" fill-opacity=".22" stroke="none"/>
-            <path d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7"/>
-            <path d="M6.3 12.1h3l1-1.5 1.8 3.4 2.7-5.6L16.3 11h4.5" stroke-width="1.7"/>
+        <div class="login-brand">
+          <div class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path
+                d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7H16l-1.7-2.5L11.6 14 9.8 10.6l-1 1.5H6.3"
+                fill="#fff" fill-opacity=".22" stroke="none" />
+              <path
+                d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7" />
+              <path d="M6.3 12.1h3l1-1.5 1.8 3.4 2.7-5.6L16.3 11h4.5" stroke-width="1.7" />
+            </svg>
+          </div>
+          <h1>ระบบจอง Body Interact</h1>
+          <div class="sub">วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ</div>
+          <svg class="pulse-line" viewBox="0 0 320 26" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="none">
+            <path d="M0 13 H90 l10 -9 l9 18 l11 -22 l10 27 l9 -14 H210 l8 -6 l7 10 H320" />
           </svg>
         </div>
-        <h1>ระบบจอง Body Interact</h1>
-        <div class="sub">วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ</div>
-        <svg class="pulse-line" viewBox="0 0 320 26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="none">
-          <path d="M0 13 H90 l10 -9 l9 18 l11 -22 l10 27 l9 -14 H210 l8 -6 l7 10 H320"/>
-        </svg>
+
+        <div class="seg" role="tablist">
+          <button id="segStudent" class="active" onclick="App.switchLoginTab('student')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M2.5 9.5 12 5l9.5 4.5L12 14z" fill="currentColor" fill-opacity=".18" stroke="none" />
+              <path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z" />
+              <path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1" />
+              <path d="M21.5 9.5v4.2" />
+            </svg>
+            นักศึกษา
+          </button>
+          <button id="segTeacher" onclick="App.switchLoginTab('teacher')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <circle cx="12" cy="8.6" r="4" fill="currentColor" fill-opacity=".18" stroke="none" />
+              <circle cx="12" cy="8.6" r="4" />
+              <path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" fill="currentColor" fill-opacity=".18" stroke="none" />
+              <path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" />
+            </svg>
+            อาจารย์
+          </button>
+          <button id="segAdmin" onclick="App.switchLoginTab('admin')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z" fill="currentColor" fill-opacity=".18"
+                stroke="none" />
+              <path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z" />
+              <path d="M9.2 12l2 2 3.6-3.8" />
+            </svg>
+            ผู้ดูแล
+          </button>
+        </div>
+
+        <!-- ฟอร์มนักศึกษา: เลขบัตรประชาชน 13 หลัก -->
+        <form id="studentForm" onsubmit="App.loginStudent(event)">
+          <div class="field">
+            <label for="sCid">เลขบัตรประชาชน (13 หลัก)</label>
+            <input class="input" id="sCid" inputmode="numeric" pattern="[0-9]*" maxlength="13"
+              placeholder="เช่น 1100701234567" autocomplete="off" required />
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
+          <div class="login-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none" />
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11.2v4.6" />
+              <circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none" />
+            </svg>
+            นักศึกษาเข้าระบบด้วยเลขบัตรประชาชน 13 หลักที่ลงทะเบียนไว้
+          </div>
+        </form>
+
+        <!-- ฟอร์มอาจารย์: อีเมล + รหัสผ่าน -->
+        <form id="teacherForm" class="hidden" onsubmit="App.loginTeacher(event)">
+          <div class="field">
+            <label for="tEmail">อีเมลอาจารย์</label>
+            <input class="input" id="tEmail" type="email" placeholder="name@bcnbangkok.ac.th" autocomplete="off"
+              required />
+          </div>
+          <div class="field">
+            <label for="tPass">รหัสผ่าน</label>
+            <input class="input" id="tPass" type="password" placeholder="รหัสผ่าน" autocomplete="off" required />
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
+          <div style="text-align:center;margin-top:12px">
+            <a href="javascript:void(0)" onclick="App.forgotPassword()"
+              style="color:#0f766e;font-size:.92rem;text-decoration:none">ลืมรหัสผ่าน?</a>
+          </div>
+        </form>
+
+        <!-- ฟอร์มผู้ดูแลระบบ: รหัสผ่าน -->
+        <form id="adminForm" class="hidden" onsubmit="App.loginAdmin(event)">
+          <div class="field">
+            <label for="aPass">รหัสผ่านผู้ดูแลระบบ</label>
+            <input class="input" id="aPass" type="password" placeholder="รหัสผ่านผู้ดูแล" autocomplete="off" required />
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
+          <div class="login-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none" />
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11.2v4.6" />
+              <circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none" />
+            </svg>
+            ผู้ดูแลระบบมีสิทธิ์แก้ไขข้อมูลได้ทุกส่วน รวมถึงการตั้งค่าระบบ
+          </div>
+        </form>
       </div>
-
-      <div class="seg" role="tablist">
-        <button id="segStudent" class="active" onclick="App.switchLoginTab('student')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5 12 5l9.5 4.5L12 14z" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/></svg>
-          นักศึกษา
-        </button>
-        <button id="segTeacher" onclick="App.switchLoginTab('teacher')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.6" r="4" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="8.6" r="4"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/></svg>
-          อาจารย์
-        </button>
-        <button id="segAdmin" onclick="App.switchLoginTab('admin')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z"/><path d="M9.2 12l2 2 3.6-3.8"/></svg>
-          ผู้ดูแล
-        </button>
-      </div>
-
-      <!-- ฟอร์มนักศึกษา: เลขบัตรประชาชน 13 หลัก -->
-      <form id="studentForm" onsubmit="App.loginStudent(event)">
-        <div class="field">
-          <label for="sCid">เลขบัตรประชาชน (13 หลัก)</label>
-          <input class="input" id="sCid" inputmode="numeric" pattern="[0-9]*" maxlength="13" placeholder="เช่น 1100701234567" autocomplete="off" required />
-        </div>
-        <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
-        <div class="login-note">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="12" r="9"/><path d="M12 11.2v4.6"/><circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none"/></svg>
-          นักศึกษาเข้าระบบด้วยเลขบัตรประชาชน 13 หลักที่ลงทะเบียนไว้
-        </div>
-      </form>
-
-      <!-- ฟอร์มอาจารย์: อีเมล + รหัสผ่าน -->
-      <form id="teacherForm" class="hidden" onsubmit="App.loginTeacher(event)">
-        <div class="field">
-          <label for="tEmail">อีเมลอาจารย์</label>
-          <input class="input" id="tEmail" type="email" placeholder="name@bcnbangkok.ac.th" autocomplete="off" required />
-        </div>
-        <div class="field">
-          <label for="tPass">รหัสผ่าน</label>
-          <input class="input" id="tPass" type="password" placeholder="รหัสผ่าน" autocomplete="off" required />
-        </div>
-        <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
-        <div style="text-align:center;margin-top:12px">
-          <a href="javascript:void(0)" onclick="App.forgotPassword()" style="color:#0f766e;font-size:.92rem;text-decoration:none">ลืมรหัสผ่าน?</a>
-        </div>
-      </form>
-
-      <!-- ฟอร์มผู้ดูแลระบบ: รหัสผ่าน -->
-      <form id="adminForm" class="hidden" onsubmit="App.loginAdmin(event)">
-        <div class="field">
-          <label for="aPass">รหัสผ่านผู้ดูแลระบบ</label>
-          <input class="input" id="aPass" type="password" placeholder="รหัสผ่านผู้ดูแล" autocomplete="off" required />
-        </div>
-        <button class="btn btn-primary btn-block" type="submit">เข้าสู่ระบบ</button>
-        <div class="login-note">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="12" r="9"/><path d="M12 11.2v4.6"/><circle cx="12" cy="7.9" r="1.1" fill="currentColor" stroke="none"/></svg>
-          ผู้ดูแลระบบมีสิทธิ์แก้ไขข้อมูลได้ทุกส่วน รวมถึงการตั้งค่าระบบ
-        </div>
-      </form>
-    </div>
 
       <!-- ปฏิทินการจองรายเดือน (ดูได้โดยไม่ต้องล็อกอิน) -->
       <div class="login-cal-panel">
         <div class="cal-month-head">
           <button class="cal-nav" onclick="App.loginMonthShift(-1)" aria-label="เดือนก่อน">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
           </button>
           <div class="cal-month-label" id="loginCalLabel">—</div>
           <button class="cal-nav" onclick="App.loginMonthShift(1)" aria-label="เดือนถัดไป">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
           </button>
         </div>
         <div id="loginCal" class="month-cal"></div>
         <div class="cal-note">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none"/><circle cx="12" cy="12" r="9"/><path d="M12 8.5v4.5"/><circle cx="12" cy="16" r="1.05" fill="currentColor" stroke="none"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" fill="currentColor" fill-opacity=".18" stroke="none" />
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8.5v4.5" />
+            <circle cx="12" cy="16" r="1.05" fill="currentColor" stroke="none" />
+          </svg>
           <span>หากจบจากการใช้งานระยะเวลาที่จองไว้ กรุณา Log out ออกจากระบบด้วยทุกครั้ง ขอบคุณครับ</span>
         </div>
       </div>
@@ -109,7 +165,12 @@
     <div class="login-footer">
       <div class="lf-web">เว็บไซต์โปรแกรม:
         <a href="https://bodyinteract.com/" target="_blank" rel="noopener">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h6v2H7v10h10v-4h2v6H5z" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M5 5h6v2H7v10h10v-4h2v6H5z"/><path d="M14 5h5v5M19 5l-7 7"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M5 5h6v2H7v10h10v-4h2v6H5z" fill="currentColor" fill-opacity=".18" stroke="none" />
+            <path d="M5 5h6v2H7v10h10v-4h2v6H5z" />
+            <path d="M14 5h5v5M19 5l-7 7" />
+          </svg>
           https://bodyinteract.com/
         </a>
       </div>
@@ -117,11 +178,15 @@
         <div class="qr-caption">สแกนเพื่อดาวน์โหลดแอป Body Interact</div>
         <div class="qr-row">
           <div class="qr-item">
-            <img src="data:image/png;base64,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" alt="QR สำหรับดาวน์โหลดบน App Store" width="120" height="120" />
+            <img
+              src="data:image/png;base64,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"
+              alt="QR สำหรับดาวน์โหลดบน App Store" width="120" height="120" />
             <span>App Store · iOS</span>
           </div>
           <div class="qr-item">
-            <img src="data:image/png;base64,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" alt="QR สำหรับดาวน์โหลดบน Google Play" width="120" height="120" />
+            <img
+              src="data:image/png;base64,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"
+              alt="QR สำหรับดาวน์โหลดบน Google Play" width="120" height="120" />
             <span>Google Play · Android</span>
           </div>
         </div>
@@ -135,9 +200,12 @@
       <div class="topbar-inner">
         <div class="brand">
           <div class="brand-logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7H16l-1.7-2.5L11.6 14 9.8 10.6l-1 1.5H6.3" fill="#fff" fill-opacity=".22" stroke="none"/>
-              <path d="M6.3 12.1h3l1-1.5 1.8 3.4 2.7-5.6L16.3 11h4.5" stroke-width="1.8"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path
+                d="M12 20.6C6.4 16.6 2.8 13.3 2.8 9.1 2.8 6.2 5 4.3 7.5 4.3c1.7 0 3.3.9 4.5 2.5 1.2-1.6 2.8-2.5 4.5-2.5 2.5 0 4.7 1.9 4.7 4.8 0 .6-.07 1.2-.2 1.7H16l-1.7-2.5L11.6 14 9.8 10.6l-1 1.5H6.3"
+                fill="#fff" fill-opacity=".22" stroke="none" />
+              <path d="M6.3 12.1h3l1-1.5 1.8 3.4 2.7-5.6L16.3 11h4.5" stroke-width="1.8" />
             </svg>
           </div>
           <div class="brand-text">
@@ -147,11 +215,19 @@
         </div>
         <div class="topbar-spacer"></div>
         <div class="user-chip">
-          <div class="who"><div class="n" id="uName">—</div><div class="r" id="uRole">—</div></div>
+          <div class="who">
+            <div class="n" id="uName">—</div>
+            <div class="r" id="uRole">—</div>
+          </div>
           <div class="av" id="uAvatar">N</div>
         </div>
         <button class="btn btn-soft btn-sm" onclick="App.logout()" title="ออกจากระบบ">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7" fill="currentColor" fill-opacity=".18" stroke="none"/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7" fill="currentColor" fill-opacity=".18" stroke="none" />
+            <path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7" />
+            <path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5" />
+          </svg>
           ออก
         </button>
       </div>
@@ -166,4 +242,5 @@
 
   <script src="app.js?v=20260815b"></script>
 </body>
+
 </html>

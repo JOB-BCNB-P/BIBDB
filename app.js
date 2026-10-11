@@ -3,14 +3,17 @@
    วิทยาลัยพยาบาลบรมราชชนนี กรุงเทพ
    ========================================================= */
 
-/* ====== ตั้งค่า ======
-   หลัง deploy Apps Script แล้ว ให้นำ Web App URL มาวางแทนค่าด้านล่าง
+/* ====== ตั้งค่า (Supabase) ======
+   SUPABASE_KEY = Publishable key (sb_publishable_...) หรือ anon key แบบเดิม (eyJ...)
+   หาได้ที่ Supabase > Project Settings > API Keys  — key นี้เปิดเผยในเว็บได้
+   (ห้ามใส่ Secret key / service_role key ในไฟล์นี้เด็ดขาด)
    ถ้ายังเป็นค่า PASTE_YOUR... ระบบจะทำงานในโหมดทดลอง (mock data) ให้อัตโนมัติ */
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbxe4Gld_vKsps_aGSOS_lv8rTxjn6zc1BIl9QG05scSWXqjyx_ZbPQFy6Fygf0pq26P/exec'
+  SUPABASE_URL: 'https://nqmbuycfboguwhgkzgvp.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_giyyTso4Hbd_xn3uxRA1eQ_VacQuF_M'
 };
 
-const MOCK_MODE = !CONFIG.API_URL || CONFIG.API_URL.indexOf('PASTE_YOUR') === 0;
+const MOCK_MODE = !CONFIG.SUPABASE_KEY || CONFIG.SUPABASE_KEY.indexOf('PASTE_YOUR') === 0;
 const PAGE_SIZE = 10;          // จำนวนแถวต่อหน้า (ปุ่มแบ่งหน้า)
 const STEP_MIN = 30;           // ความละเอียดช่วงเวลาจอง (นาที)
 
@@ -65,7 +68,6 @@ const I = {
   doc:'<path d="M6 3h7l5 5v13H6z"'+F+'/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
   ext:'<path d="M5 5h6v2H7v10h10v-4h2v6H5z"'+F+'/><path d="M5 5h6v2H7v10h10v-4h2v6H5z"/><path d="M14 5h5v5M19 5l-7 7"/>',
   grid:'<rect x="3" y="3" width="7" height="7" rx="2.2"'+F+'/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"'+F+'/><rect x="3" y="3" width="7" height="7" rx="2.2"/><rect x="14" y="3" width="7" height="7" rx="2.2"/><rect x="3" y="14" width="7" height="7" rx="2.2"/><rect x="14" y="14" width="7" height="7" rx="2.2"/>',
-  lock:'<rect x="4.5" y="10.5" width="15" height="10.5" rx="3"'+F+'/><rect x="4.5" y="10.5" width="15" height="10.5" rx="3"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15.4" r="1.5"'+D+'/><path d="M12 16.6v1.8"/>',
 };
 function svg(path, cls){ return '<svg '+(cls?'class="'+cls+'" ':'')+'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+path+'</svg>'; }
 
@@ -82,17 +84,28 @@ function isStaff(){ return State.user && (State.user.role==='teacher' || State.u
 async function api(action, params){
   params = params || {};
   if (MOCK_MODE) return MockAPI.handle(action, params);
+  // แนบ session token ทุกครั้ง — เซิร์ฟเวอร์ใช้ token ตรวจสิทธิ์ (ไม่เชื่อ role ที่ส่งจากเบราว์เซอร์)
+  const p = Object.assign({}, params);
+  if (State.user && State.user.token) p.token = State.user.token;
+  const headers = { 'Content-Type': 'application/json', apikey: CONFIG.SUPABASE_KEY };
+  if (CONFIG.SUPABASE_KEY.indexOf('eyJ') === 0) headers.Authorization = 'Bearer ' + CONFIG.SUPABASE_KEY;
   try {
-    const res = await fetch(CONFIG.API_URL, {
+    const res = await fetch(CONFIG.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/rpc/api', {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // เลี่ยง CORS preflight
-      body: JSON.stringify(Object.assign({ action }, params)),
-      redirect: 'follow'
+      headers,
+      body: JSON.stringify({ action, p })
     });
     const data = await res.json();
+    if (!res.ok) return { error: (data && (data.message || data.hint)) || ('เซิร์ฟเวอร์ตอบกลับ HTTP ' + res.status) };
+    // session หมดอายุ/ไม่ถูกต้อง → ออกจากระบบอัตโนมัติ
+    if (data && data.code === 'AUTH' && State.user){
+      State.user = null; clearSession(); Cache.wipe();
+      toast(data.error, 'err');
+      setTimeout(()=>location.reload(), 1500);
+    }
     return data;
   } catch (e) {
-    return { error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตหรือ URL' };
+    return { error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต' };
   }
 }
 
@@ -193,7 +206,7 @@ const App = {
   async boot(){
     if (MOCK_MODE) showDemoBanner();
     const u = loadSession();
-    if (u && u.user_id){
+    if (u && u.user_id && (MOCK_MODE || u.token)){   // session เก่าจาก Apps Script (ไม่มี token) → ให้เข้าสู่ระบบใหม่
       State.user = u;
       await App.enterApp();
     } else {
@@ -286,7 +299,7 @@ const App = {
   async loginStudent(e){
     e.preventDefault();
     const cid = $('sCid').value.replace(/\D/g,'');
-    if (cid.length !== 13) return fieldError('sCid', 'เลขบัตรประชาชนต้องมี 13 หลัก (กรอกแล้ว '+cid.length+' หลัก)');
+    if (cid.length !== 13) return toast('กรุณากรอกเลขบัตรประชาชนให้ครบ 13 หลัก', 'err');
     const btn = e.target.querySelector('button[type=submit]');
     setLoading(btn, true);
     const r = await api('login', { role:'student', national_id: cid });
@@ -322,69 +335,9 @@ const App = {
     await App.enterApp();
   },
 
-  /* ===== ลืมรหัสผ่าน (อาจารย์ / ผู้ดูแล) — OTP + ตั้งรหัสใหม่ ===== */
-  forgotPassword(){
-    App._fpEmail = '';
-    openModal(`
-      <h3 style="display:flex;align-items:center;gap:8px">${svg(I.lock)} ลืมรหัสผ่าน</h3>
-      <p class="modal-sub">สำหรับบัญชีอาจารย์ — กรอกอีเมลเพื่อรับรหัส OTP สำหรับตั้งรหัสผ่านใหม่</p>
-      <div id="fpStep1">
-        <div class="field">
-          <label for="fpEmail">อีเมล</label>
-          <input class="input" id="fpEmail" type="email" placeholder="name@bcnbangkok.ac.th" autocomplete="off" />
-        </div>
-        <button class="btn btn-primary btn-block" onclick="App.fpRequest()">ส่งรหัส OTP</button>
-      </div>
-      <div id="fpStep2" class="hidden">
-        <div class="field">
-          <label for="fpOtp">รหัส OTP (6 หลัก)</label>
-          <input class="input" id="fpOtp" inputmode="numeric" maxlength="6" placeholder="กรอกรหัสที่ส่งไปอีเมล" autocomplete="off" />
-        </div>
-        <div class="field">
-          <label for="fpNew">รหัสผ่านใหม่ (อย่างน้อย 8 ตัว มีตัวอักษร+ตัวเลข)</label>
-          <input class="input" id="fpNew" type="password" autocomplete="new-password" />
-        </div>
-        <div class="field">
-          <label for="fpConfirm">ยืนยันรหัสผ่านใหม่</label>
-          <input class="input" id="fpConfirm" type="password" autocomplete="new-password" />
-        </div>
-        <button class="btn btn-primary btn-block" onclick="App.fpConfirm()">ตั้งรหัสผ่านใหม่</button>
-      </div>
-    `);
-  },
-  async fpRequest(){
-    const btn = event.target;
-    const email = $('fpEmail').value.trim();
-    if (!email) return fieldError('fpEmail','กรุณากรอกอีเมล');
-    setLoading(btn, true);
-    const r = await api('forgotPasswordRequest', { email });
-    setLoading(btn, false, 'ส่งรหัส OTP');
-    if (r.error) return toast(r.error, 'err');
-    App._fpEmail = email;
-    toast(r.message || 'หากอีเมลอยู่ในระบบ จะได้รับรหัส OTP', 'ok', { duration:5500 });
-    $('fpStep1').classList.add('hidden');
-    $('fpStep2').classList.remove('hidden');
-  },
-  async fpConfirm(){
-    const btn = event.target;
-    const otp = $('fpOtp').value.trim(), np = $('fpNew').value, cf = $('fpConfirm').value;
-    if (!/^\d{6}$/.test(otp)) return fieldError('fpOtp','กรอกรหัส OTP 6 หลัก');
-    if (np.length < 8) return fieldError('fpNew','รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
-    if (!/[A-Za-z]/.test(np) || !/[0-9]/.test(np)) return fieldError('fpNew','ต้องมีทั้งตัวอักษรและตัวเลข');
-    if (np !== cf) return fieldError('fpConfirm','รหัสผ่านยืนยันไม่ตรงกัน');
-    setLoading(btn, true);
-    const r = await api('forgotPasswordConfirm', { email: App._fpEmail, otp, new_password: np });
-    setLoading(btn, false, 'ตั้งรหัสผ่านใหม่');
-    if (r.error) return toast(r.error, 'err');
-    App._closeModal();
-    alertDialog('สำเร็จ', r.message || 'ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว', 'ok', 'เข้าสู่ระบบ');
-  },
-
   logout(){
     confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', async ()=>{
-      busy('กำลังออกจากระบบ…');
-      // บันทึก logout ลงชีต Logs ก่อนล้าง session
-      try { await api('logout', { user_id: State.user.user_id, role: State.user.role }); } catch(e){}
+      try { await api('logout'); } catch(e){}   // ยกเลิก session ฝั่งเซิร์ฟเวอร์
       clearSession(); Cache.wipe(); location.reload();  // ล้างข้อมูลแคช กันข้อมูลค้างข้ามผู้ใช้
     });
   },
@@ -436,12 +389,11 @@ const App = {
       items = [
         ['tdash', I.dash, 'ภาพรวม'],
         ['sbook', I.plus, 'จองคิว'],
-        ['tbookings', I.list, 'การจองของฉัน'],
+        ['tbookings', I.list, 'การจองทั้งหมด'],
         ['tcal', I.cal, 'ปฏิทิน'],
         ['tscenarios', I.grid, 'Scenarios'],
         ['tbi', I.key, 'บัญชี BI'],
         ['treport', I.report, 'รายงาน'],
-        ['tchpwd', I.lock, 'เปลี่ยนรหัสผ่าน'],
       ];
     } else {
       items = [
@@ -462,7 +414,7 @@ const App = {
     State.view = view;
     document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.v===view));
     const m = $('main');
-    m.innerHTML = skeletonView(); // โครงร่างกะพริบระหว่างโหลด (ถ้ามี cache จะถูกแทนที่ทันที)
+    m.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด…</div>';
     const fn = Views[view];
     if (fn) fn(m); else m.innerHTML = '<div class="empty">ไม่พบหน้านี้</div>';
     window.scrollTo({top:0, behavior:'smooth'});
@@ -489,7 +441,7 @@ Views._sdashRender = function(m, d){
   const mine = (bk.bookings||[]);
   const upcoming = mine.filter(b=> b.date>=todayISO() && (b.status==='approved'||b.status==='pending'))
                        .sort((a,b)=> (a.date+a.start_time).localeCompare(b.date+b.start_time));
-  const freeStudent = st.free_bi_student||0;
+  const freeToday = st.free_bi_today||0;
   const pendingCount = mine.filter(b=>b.status==='pending').length;
 
   m.innerHTML = `
@@ -498,7 +450,7 @@ Views._sdashRender = function(m, d){
       <div class="grid cols-3" style="margin-bottom:18px">
         ${stat('mint', I.book, upcoming.length, 'คิวที่กำลังจะถึง')}
         ${stat('warn', I.clock, pendingCount, 'รออนุมัติ')}
-        ${stat('sky', I.cap, freeStudent, 'User นักศึกษาว่างวันนี้')}
+        ${stat('sky', I.pulse, freeToday, 'User ว่างวันนี้')}
       </div>
 
       <div class="card">
@@ -569,27 +521,23 @@ Views._slotsRender = function(dateISO, d){
   const scnList = ((Views._scnCache||{}).scenarios)||[];
   State._avail = av;
   Views._members = [];
-  Views._scnSel = [];          // เคสที่เลือกไว้ (เลือกได้หลายเคส)
-  Views._scnAll = scnList;
+
+  const scnOptions = scnList.map(s=>{
+    const label = (s.no? s.no+' · ':'') + s.title + (s.level? ' ('+s.level+')':'');
+    const val = (s.no? s.no+' · ':'') + s.title;
+    return `<option value="${esc(val)}">${esc(label)}</option>`;
+  }).join('');
 
   // รายชื่ออาจารย์ (ผู้สอน/ผู้ควบคุม) — ถ้าอาจารย์เป็นผู้จอง เลือกตัวเองให้อัตโนมัติ
   const teacherOpts = (Views._userCache||[]).filter(u=>u.role==='teacher').map(t=>
     `<option value="${esc(t.name)}" ${State.user.role==='teacher'&&String(t.user_id)===String(State.user.user_id)?'selected':''}>${esc(t.name)}</option>`
   ).join('');
 
-  // แผนภาพความว่างรายช่วง 30 นาที (การ์ด + จุดสถานะ + ป้ายบอกจำนวนเครื่องว่างเมื่อชี้)
+  // แผนภาพความว่างรายช่วง 30 นาที
   const steps = av.steps||[];
   const stepChips = steps.map(st=>{
     const cls = st.free<=0 ? 'full' : (st.used>0 ? 'part' : '');
-    const endT = m2t(t2m(st.time)+STEP_MIN);
-    const tip = st.free<=0
-      ? `${st.time}–${endT} น. · เต็ม จองไม่ได้`
-      : `${st.time}–${endT} น. · ว่าง ${st.free}/${av.total_stations} เครื่อง`;
-    return `<div class="tl-step ${cls}" tabindex="0">
-      <span class="tl-dot"></span>
-      <span class="tl-time">${st.time}</span>
-      <span class="tl-tip">${tip}</span>
-    </div>`;
+    return `<div class="tl-step ${cls}" title="${st.time} · ว่าง ${st.free}/${av.total_stations}"><span>${st.time}</span></div>`;
   }).join('');
 
   // ตัวเลือกเวลาเริ่ม: เฉพาะช่วงที่ยังว่าง
@@ -599,11 +547,7 @@ Views._slotsRender = function(dateISO, d){
   area.innerHTML = `
     <div class="field"><label>ความว่างของวัน (${fmtThaiDate(dateISO)})</label>
       <div class="timeline">${stepChips || '<div class="help">ยังไม่ได้ตั้งค่าเวลาเปิด-ปิด</div>'}</div>
-      <div class="tl-legend">
-        <div class="lgi"><span class="lg free"></span><div><b>ว่าง</b><small>สามารถจองได้ทุกเครื่อง</small></div></div>
-        <div class="lgi"><span class="lg part"></span><div><b>ว่างบางเครื่อง</b><small>บางเครื่องถูกจองแล้ว</small></div></div>
-        <div class="lgi"><span class="lg full"></span><div><b>เต็ม</b><small>ไม่สามารถจองช่วงนี้ได้</small></div></div>
-      </div>
+      <div class="tl-legend"><span class="lg free"></span>ว่าง <span class="lg part"></span>ว่างบางเครื่อง <span class="lg full"></span>เต็ม</div>
     </div>
     ${startOpts ? `
     <div class="grid cols-3">
@@ -623,23 +567,20 @@ Views._slotsRender = function(dateISO, d){
     <div id="bookForm">
       <div class="grid cols-2">
         <div class="field">
-          <label for="bkScnSearch">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios · เลือกได้หลายเคส)</label>
-          <div class="member-picker" id="scnPicker">
-            <div id="bkScnChips" class="member-chips"></div>
-            <input class="input" id="bkScnSearch" placeholder="พิมพ์ชื่อ/เลขเคสเพื่อค้นหา แล้วกดเลือก…" autocomplete="off"
-                   oninput="Views.scnSearch2(this.value)" onfocus="Views.scnSearch2(this.value)" />
-            <div id="bkScnList" class="member-list hidden"></div>
-          </div>
-          <div class="help">เลือกได้มากกว่าหนึ่งเคส</div>
+          <label for="bkCase">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios)</label>
+          <select class="input" id="bkCase">
+            <option value="">— เลือก Scenario —</option>
+            ${scnOptions}
+          </select>
         </div>
         <div class="field">
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
           <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
         </div>
         <div class="field">
-          <label for="bkBiCount">จำนวนเครื่อง / บัญชี BI ที่ต้องการใช้ <span style="color:var(--danger)">*</span></label>
-          <input class="input" id="bkBiCount" type="number" min="1" max="20" value="1" required />
-          <div class="help">ต้องระบุอย่างน้อย 1 บัญชี · ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติ</div>
+          <label for="bkBiCount">จำนวนบัญชี BI ที่ต้องการใช้</label>
+          <input class="input" id="bkBiCount" type="number" min="0" max="20" value="1" />
+          <div class="help">ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติการจอง</div>
         </div>
       </div>
       <div class="field">
@@ -755,64 +696,18 @@ Views.renderMemberChips = function(){
   const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
 };
 
-/* ---------- เลือก Scenario ได้หลายเคส (ค้นหาจากรายการ) ---------- */
-Views._scnSel = [];
-Views.scnSearch2 = function(q){
-  const list = $('bkScnList'); if (!list) return;
-  q = String(q||'').trim().toLowerCase();
-  const pool = (Views._scnAll||[]).map((s,i)=>({s,i})).filter(({s,i})=>
-    !Views._scnSel.some(x=>x.i===i) &&
-    (!q || (String(s.no||'')+' '+String(s.title||'')+' '+String(s.level||'')).toLowerCase().includes(q))
-  );
-  list.innerHTML = pool.length
-    ? pool.slice(0,8).map(({s,i})=>`
-        <button type="button" class="member-opt" onclick="Views.addScn(${i})">
-          <span class="mo-name">${esc((s.no?s.no+' · ':'')+s.title)}</span>
-          <span class="mo-role">${esc(s.level||'')}</span>
-        </button>`).join('')
-    : '<div class="member-empty">ไม่พบเคสที่ค้นหา</div>';
-  list.classList.remove('hidden');
-};
-Views.addScn = function(i){
-  const s = (Views._scnAll||[])[i]; if (!s) return;
-  if (!Views._scnSel.some(x=>x.i===i)) Views._scnSel.push({ i, val:(s.no?s.no+' · ':'')+s.title });
-  const inp = $('bkScnSearch'); if (inp){ inp.value=''; inp.focus(); }
-  const l = $('bkScnList'); if (l) l.classList.add('hidden');
-  clearFieldError('bkScnSearch');
-  Views.renderScnChips();
-};
-Views.removeScn = function(i){
-  Views._scnSel = Views._scnSel.filter(x=>x.i!==i);
-  Views.renderScnChips();
-};
-Views.renderScnChips = function(){
-  const host = $('bkScnChips'); if (!host) return;
-  host.innerHTML = Views._scnSel.map(x=>`
-    <span class="member-chip teacher">
-      ${esc(x.val)}
-      <button type="button" onclick="Views.removeScn(${x.i})" aria-label="ลบเคส">&times;</button>
-    </span>`).join('');
-};
-
 Views.submitBooking = async function(){
   const start = $('bkStart') && $('bkStart').value;
   const end = $('bkEnd') && $('bkEnd').value;
-  // ตรวจครบทุกช่องก่อน แล้วชี้จุดผิดใต้ช่องนั้นๆ (inline validation)
-  let bad = false;
-  if (!start || !end){ if ($('bkStart')) fieldError('bkStart','กรุณาเลือกช่วงเวลา'); bad = true; }
-  if (!Views._scnSel.length){ fieldError('bkScnSearch','กรุณาเลือก Scenario อย่างน้อย 1 เคส'); bad = true; }
-  if (!$('bkTeacher').value){ fieldError('bkTeacher','กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม'); bad = true; }
-  const size = parseInt($('bkSize').value,10);
-  if (!size || size < 1){ fieldError('bkSize','ระบุจำนวนผู้เข้าฝึกอย่างน้อย 1 คน'); bad = true; }
-  const bic = parseInt($('bkBiCount') && $('bkBiCount').value, 10);
-  if ($('bkBiCount') && (isNaN(bic) || bic < 1)){ fieldError('bkBiCount','กรุณาระบุจำนวนบัญชี BI อย่างน้อย 1'); bad = true; }
-  if (bad) return toast('กรุณากรอกข้อมูลให้ครบถ้วน', 'err');
+  if (!start || !end) return toast('กรุณาเลือกช่วงเวลา', 'err');
+  if (!$('bkCase').value) return toast('กรุณาเลือก Scenario ที่จะฝึก', 'err');
+  if (!$('bkTeacher').value) return toast('กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม', 'err');
   const btn = event.target;
   setLoading(btn, true);
   const r = await api('createBooking', {
     user_id: State.user.user_id, name: State.user.name, role: State.user.role,
     date: State.bookDate, start_time: start, end_time: end,
-    subject_case: Views._scnSel.map(x=>x.val).join(', '),
+    subject_case: $('bkCase').value,
     supervisor: $('bkTeacher').value,
     note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value,10)||1,
@@ -820,10 +715,10 @@ Views.submitBooking = async function(){
     bi_count: parseInt($('bkBiCount') && $('bkBiCount').value, 10) || 0
   });
   setLoading(btn, false, 'ยืนยันการจอง');
-  if (r.error) return alertDialog('จองไม่สำเร็จ', r.error, 'err'); // แจ้งผลด้วย dialog เต็ม
+  if (r.error) return toast(r.error, 'err');
   invalidateData();
-  alertDialog('จองสำเร็จ!', 'ระบบบันทึกคำขอแล้ว รอผู้ดูแลระบบอนุมัติ', 'ok', 'ตกลง',
-    ()=>App.go(isStaff() ? 'tbookings' : 'smine'));
+  toast('จองสำเร็จ! รอผู้ดูแลระบบอนุมัติ', 'ok');
+  App.go(isStaff() ? 'tbookings' : 'smine');
 };
 
 /* ---------- นักศึกษา: การจองของฉัน ---------- */
@@ -849,18 +744,14 @@ Views._smineRender = function(m, d){
 
 App.cancelMine = function(id){
   confirmModal('ยกเลิกการจอง', 'ต้องการยกเลิกการจองนี้ใช่หรือไม่?', 'ยกเลิกการจอง', async ()=>{
-    busy('กำลังยกเลิกการจอง…');
     const r = await api('cancelBooking', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
-    busyDone();
     if (r.error) return toast(r.error,'err');
     invalidateData();
-    toast('ยกเลิกการจองเรียบร้อยแล้ว','ok'); App.go(State.view);
+    toast('ยกเลิกการจองแล้ว','ok'); App.go(State.view);
   });
 };
 App.checkIn = async function(id){
-  busy('กำลังเช็คอิน…');
   const r = await api('checkIn', { booking_id:id, user_id:State.user.user_id, role:State.user.role });
-  busyDone();
   if (r.error) return toast(r.error,'err');
   invalidateData();
   toast('เช็คอินเรียบร้อย ✅','ok'); App.go(State.view);
@@ -980,12 +871,11 @@ Views._tdashRender = function(m, d){
   m.innerHTML = `
     <div class="view">
       <div class="section-head"><h2>ภาพรวมระบบ</h2><span class="hint">ข้อมูลวันที่ ${fmtThaiDate(st.today||todayISO())}</span></div>
-      <div class="grid cols-5" style="margin-bottom:18px">
+      <div class="grid cols-4" style="margin-bottom:18px">
         ${stat('mint', I.book, st.bookings_today||0, 'การจองวันนี้')}
         ${stat('warn', I.clock, st.pending||0, 'รออนุมัติ')}
-        ${stat('sky', I.cap, st.free_bi_student||0, 'User นักศึกษาว่างวันนี้')}
-        ${stat('blush', I.user, st.free_bi_teacher||0, 'User อาจารย์ว่างวันนี้')}
-        ${stat('mint', I.report, st.weekly_total||0, 'การใช้งาน 7 วัน')}
+        ${stat('sky', I.pulse, st.free_bi_today||0, 'User ว่างวันนี้')}
+        ${stat('blush', I.report, st.weekly_total||0, 'การใช้งาน 7 วัน')}
       </div>
       <div class="card">
         <div class="section-head"><h3>คำขอที่รออนุมัติ</h3><span class="hint">${pend.length} รายการ${isAdmin()?'':' · อนุมัติโดยผู้ดูแลระบบเท่านั้น'}</span>
@@ -999,17 +889,13 @@ Views._tdashRender = function(m, d){
 /* ---------- อาจารย์/ผู้ดูแล: การจองทั้งหมด ---------- */
 Views.tbookings = async function(m){
   State._tFilter = State._tFilter || 'all';
-  // อาจารย์/นักศึกษาเห็นเฉพาะการจองของตนเอง · ผู้ดูแลระบบเห็นทั้งหมด
-  const mineOnly = !isAdmin();
-  const key = mineOnly ? ('v:tbookings:'+State.user.user_id) : 'v:tbookings';
-  await viewSWR(key, async ()=>{
-    const bk = await api('getBookings', mineOnly ? { user_id: State.user.user_id } : {});
+  await viewSWR('v:tbookings', async ()=>{
+    const bk = await api('getBookings', {});
     return { bk, __err: !!bk.error };
   }, (d)=>Views._tbookingsRender(m, d));
 };
 Views._tbookingsRender = function(m, d){
   const bk = d.bk || {};
-  const mineOnly = !isAdmin();
   let list = (bk.bookings||[]).sort((a,b)=>(b.date+b.start_time).localeCompare(a.date+a.start_time));
   const f = State._tFilter;
   const filtered = f==='all' ? list : list.filter(b=>b.status===f);
@@ -1020,12 +906,12 @@ Views._tbookingsRender = function(m, d){
 
   m.innerHTML = `
     <div class="view">
-      <div class="section-head"><h2>${mineOnly?'การจองของฉัน':'การจองทั้งหมด'}</h2><span class="hint">${filtered.length} รายการ</span>
+      <div class="section-head"><h2>การจองทั้งหมด</h2><span class="hint">${filtered.length} รายการ</span>
         <span class="topbar-spacer"></span>
         <button class="btn btn-ghost btn-sm" onclick="App.exportCSV()">${svg(I.dl)}Export CSV</button></div>
       <div class="card">
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">
-          ${filterBtn('all','ทั้งหมด')}${filterBtn('pending','รออนุมัติ')}${filterBtn('approved','อนุมัติแล้ว')}${filterBtn('completed','เสร็จสิ้น')}${filterBtn('rejected','ปฏิเสธ')}${filterBtn('cancelled','ยกเลิก')}
+          ${filterBtn('all','ทั้งหมด')}${filterBtn('pending','รออนุมัติ')}${filterBtn('approved','อนุมัติแล้ว')}${filterBtn('rejected','ปฏิเสธ')}${filterBtn('cancelled','ยกเลิก')}
         </div>
         ${filtered.length ? `
         <div class="table-wrap"><table>
@@ -1043,35 +929,23 @@ function cacheBookings(list){
   (list||[]).forEach(b=>{ State._bkCache[b.booking_id] = b; });
 }
 
-/* ---------- อนุมัติ (ผู้ดูแลระบบเท่านั้น) + จ่ายบัญชี BI ----------
-   - กด +/− เลือกจำนวน → ระบบติ๊กบัญชีว่างให้อัตโนมัติ
-     (ประเภทเดียวกับผู้จองก่อน แล้วจึงอีกประเภท)
-   - หรือกด "เลือกบัญชีเอง" เพื่อเปิดรายการสวิตช์เลื่อน (scroll ได้) */
+/* ---------- อนุมัติ (ผู้ดูแลระบบเท่านั้น) + จ่ายบัญชี BI ---------- */
 App.approve = async function(id){
   if (!isAdmin()) return toast('การอนุมัติทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   const b = State._bkCache[id];
-  // ใช้แคชบัญชีในหน่วยความจำ (อายุ 30 วิ) → เปิดหน้าอนุมัติรายถัดไปได้ทันทีไม่ต้องโหลดซ้ำ
-  let accounts;
-  if (State._biAccounts && (Date.now() - (State._biAccountsAt||0) < 30000)){
-    accounts = State._biAccounts;
-  } else {
-    const r = await api('getBIAccounts', { role:'admin', user_id:State.user.user_id });
-    if (r.error) return toast(r.error,'err');
-    accounts = (r.accounts||[]);
-    State._biAccounts = accounts; State._biAccountsAt = Date.now();
-  }
-  const avail = accounts.filter(a=>a.status==='available');   // แสดงเฉพาะบัญชีที่ยังว่าง
-
-  const sw = a => `
-    <label class="asn-item">
-      <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
-      <span class="topbar-spacer"></span>
-      <span class="sw"><input type="checkbox" class="asnck" value="${esc(a.account_id)}" onchange="App.asnSync()" /><span class="sw-track"></span></span>
-    </label>`;
+  const r = await api('getBIAccounts', { role:'admin', user_id:State.user.user_id });
+  const accounts = (r.accounts||[]);
+  const avail = accounts.filter(a=>a.status==='available');
   const group = (type, label)=>{
     const items = avail.filter(a=>a.account_type===type);
     if (!items.length) return '';
-    return `<div class="asn-group"><div class="asn-head">${label} (${items.length})</div>${items.map(sw).join('')}</div>`;
+    return `<div class="asn-group"><div class="asn-head">${label}</div>
+      ${items.map(a=>`
+        <label class="asn-item">
+          <input type="checkbox" class="asnck" value="${esc(a.account_id)}" />
+          <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
+        </label>`).join('')}
+    </div>`;
   };
   const info = b ? `<div class="asn-bk">
       <b>${esc(b.name)}</b> · ${fmtThaiShort(b.date)} · ${esc(b.start_time)}–${esc(b.end_time)}
@@ -1079,161 +953,76 @@ App.approve = async function(id){
       ${b.bi_count?`<span class="badge pending">ขอบัญชี BI ${esc(String(b.bi_count))} บัญชี</span>`:''}
       ${b.group_members?`<div class="help">กลุ่ม: ${esc(b.group_members)}</div>`:''}
     </div>` : '';
-
-  const wantN = Math.min((b && b.bi_count) || 0, avail.length);   // จำนวนที่ขอ (แสดงเป็นเป้าหมาย)
   openModal(`
     <div class="asn">
       <h3 style="margin-bottom:6px">อนุมัติการจอง</h3>
       ${info}
-      ${avail.length ? `
-      <div class="asn-count">
-        <div>
-          <b>เลือกบัญชี BI ที่จะจ่าย</b>
-          <div class="help">ผู้จองขอ <b>${wantN}</b> บัญชี · เลือกเองจากบัญชีที่ว่าง ${avail.length} บัญชี (เพิ่ม/ลดได้)</div>
-          ${b && b.supervisor ? `<div class="help">บัญชีนักศึกษา → แสดงที่ผู้จอง · บัญชีอาจารย์ → แสดงที่ <b>${esc(b.supervisor)}</b></div>` : ''}
-        </div>
-        <div class="asn-badge">เลือกแล้ว <span id="asnCount">0</span> / ${wantN}</div>
-      </div>
-      <div class="help" style="margin:2px 0 8px">ติ๊กเลือกบัญชีที่ต้องการจ่าย (แสดงเฉพาะบัญชีที่ยังว่าง)</div>
-      <div id="asnList" class="asn-scroll">
-        ${group('teacher','บัญชีอาจารย์ (ว่าง)')}${group('student','บัญชีนักศึกษา (ว่าง)')}
-      </div>` : '<div class="dd-empty" style="padding:8px 0">ไม่มีบัญชี BI ว่างในขณะนี้</div>'}
+      <p class="modal-sub" style="margin-bottom:10px">เลือกบัญชี BI (user) ที่จะจ่ายให้ผู้จอง — เลือกได้หลายบัญชีเมื่อกลุ่มมีหลายคน หรือไม่เลือกก็ได้</p>
+      ${avail.length ? (group('teacher','บัญชีอาจารย์') + group('student','บัญชีนักศึกษา')) : '<div class="dd-empty" style="padding:8px 0">ไม่มีบัญชี BI ว่างในขณะนี้</div>'}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
         <button class="btn btn-primary" onclick="App.confirmApprove('${esc(id)}')">${svg(I.check)}อนุมัติ</button>
       </div>
     </div>`);
-
-  // ไม่ติ๊กบัญชีให้อัตโนมัติ — ให้ผู้อนุมัติเลือกบัญชีเอง (ตามที่กำหนด)
-  App.asnSync();
-};
-
-/* อัปเดตตัวเลข "เลือกแล้ว N" ตามจำนวนบัญชีที่ติ๊ก */
-App.asnSync = function(){
-  const el = $('asnCount');
-  if (el) el.textContent = document.querySelectorAll('.asnck:checked').length;
 };
 App.confirmApprove = async function(id){
   const ids = Array.from(document.querySelectorAll('.asnck')).filter(c=>c.checked).map(c=>c.value);
   App._closeModal();
-  busy('กำลังบันทึกการอนุมัติ…');
   const r = await api('updateStatus', { booking_id:id, status:'approved', actor_id:State.user.user_id, bi_accounts: ids });
-  busyDone();
   if (r.error) return toast(r.error,'err');
-  // อัปเดตแคชบัญชีในหน่วยความจำ (ไม่ต้องดึงใหม่) → อนุมัติรายถัดไปเร็ว
-  if (State._biAccounts){
-    const set = {}; ids.forEach(x=>set[String(x)]=1);
-    State._biAccounts.forEach(a=>{ if (set[String(a.account_id)]) a.status='approved'; });
-    State._biAccountsAt = Date.now();
-  }
   invalidateData();
-  toast(ids.length?('บันทึกการอนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'บันทึกการอนุมัติแล้ว','ok');
+  toast(ids.length?('อนุมัติแล้ว · จ่ายบัญชี BI '+ids.length+' บัญชี'):'อนุมัติแล้ว','ok');
   App.go(State.view);
-};
-App.completeBooking = function(id){
-  if (!isAdmin()) return toast('ปิดการจองทำได้โดยผู้ดูแลระบบเท่านั้น','err');
-  confirmModal('ปิดการจอง (เสร็จสิ้น)','ยืนยันปิดการจองนี้เป็น "เสร็จสิ้น"? ระบบจะคืนบัญชี BI ที่จ่ายไว้ให้ว่างอัตโนมัติ','เสร็จสิ้น', async ()=>{
-    busy('กำลังปิดการจอง…');
-    const r = await api('updateStatus', { booking_id:id, status:'completed', actor_id:State.user.user_id });
-    busyDone();
-    if (r.error) return toast(r.error,'err');
-    State._biAccounts = null;   // บัญชีถูกคืน → ล้างแคช
-    invalidateData(); toast('ปิดการจองเรียบร้อย · คืนบัญชีให้ว่างแล้ว','ok'); App.go(State.view);
-  });
 };
 App.reject = function(id){
   if (!isAdmin()) return toast('การปฏิเสธทำได้โดยผู้ดูแลระบบเท่านั้น','err');
   confirmModal('ปฏิเสธการจอง','ต้องการปฏิเสธการจองนี้ใช่หรือไม่?','ปฏิเสธ', async ()=>{
-    busy('กำลังบันทึก…');
     const r = await api('updateStatus', { booking_id:id, status:'rejected', actor_id:State.user.user_id });
-    busyDone();
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('บันทึกการปฏิเสธแล้ว','ok'); App.go(State.view);
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ปฏิเสธแล้ว','ok'); App.go(State.view);
   });
 };
 App.teacherCancel = function(id){
   confirmModal('ยกเลิกการจอง','ยืนยันยกเลิกการจองรายการนี้?','ยกเลิก', async ()=>{
-    busy('กำลังยกเลิกการจอง…');
     const r = await api('cancelBooking', { booking_id:id, role:State.user.role, user_id:State.user.user_id, actor_id:State.user.user_id });
-    busyDone();
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ยกเลิกการจองเรียบร้อยแล้ว','ok'); App.go(State.view);
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ยกเลิกแล้ว','ok'); App.go(State.view);
   });
 };
 App.adminDelete = function(id){
   confirmModal('ลบการจองถาวร','ลบรายการจองนี้ออกจากระบบอย่างถาวร? การกระทำนี้ย้อนกลับไม่ได้','ลบถาวร', async ()=>{
-    busy('กำลังลบรายการ…');
     const r = await api('deleteBooking', { booking_id:id, role:'admin', actor_id:State.user.user_id });
-    busyDone();
-    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบรายการเรียบร้อยแล้ว','ok'); App.go(State.view);
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบรายการแล้ว','ok'); App.go(State.view);
   });
 };
 
-/* ---------- อาจารย์/ผู้ดูแล: รายงาน ----------
-   จัดอันดับผู้ใช้งานเป็นกราฟแท่ง เลือกดูตามปี พ.ศ. และแยกกลุ่ม อาจารย์/นักศึกษา/อื่นๆ */
+/* ---------- อาจารย์/ผู้ดูแล: รายงาน ---------- */
 Views.treport = async function(m){
-  const year = State._repYear || 'all';
-  let params = {};
-  if (year !== 'all'){
-    const ce = parseInt(year,10) - 543; // พ.ศ. → ค.ศ.
-    params = { from: ce+'-01-01', to: ce+'-12-31' };
-  }
-  await viewSWR('v:treport:'+year, async ()=>{
-    const rp = await api('getReport', params);
+  await viewSWR('v:treport', async ()=>{
+    const rp = await api('getReport', {});
     return { rp, __err: !!rp.error };
   }, (d)=>Views._treportRender(m, d));
 };
-Views.repYear = function(v){ State._repYear = v; App.go('treport'); };
-Views.repRole = function(v){ State._repRole = v; App.go('treport'); };
-
 Views._treportRender = function(m, d){
   const rp = d.rp || {};
   const users = rp.by_user||[]; const cases = rp.by_case||[];
+  const maxU = Math.max(1, ...users.map(u=>u.count));
   const maxC = Math.max(1, ...cases.map(c=>c.count));
+  const pgU = paginate('rep_u', users);
   const pgC = paginate('rep_c', cases);
-
-  // ตัวเลือกปี พ.ศ. — แสดงเฉพาะปีที่มีข้อมูลจริงในระบบ
-  let year = State._repYear || 'all';
-  const dataYears = (rp.years||[]).slice();
-  if (year !== 'all' && dataYears.indexOf(parseInt(year,10)) === -1){
-    year = 'all'; State._repYear = 'all'; // ปีที่เลือกไว้ไม่มีข้อมูลแล้ว → กลับไปดูทุกปี
-  }
-  const yearOpts = ['<option value="all"'+(year==='all'?' selected':'')+'>ทุกปี</option>']
-    .concat(dataYears.map(y=>
-      `<option value="${y}" ${String(year)===String(y)?'selected':''}>พ.ศ. ${y}</option>`)).join('');
-
-  // แยกกลุ่มผู้ใช้: แสดงเฉพาะกลุ่มที่มีข้อมูลจริง
-  const roleOf = u => (u.role==='teacher' ? 'teacher' : (u.role==='student' ? 'student' : 'other'));
-  const roleLabel = { teacher:'อาจารย์', student:'นักศึกษา', other:'อื่นๆ' };
-  const availRoles = ['teacher','student','other'].filter(v=>users.some(u=>roleOf(u)===v));
-  let role = State._repRole || 'student';
-  if (availRoles.indexOf(role) === -1 && availRoles.length) role = availRoles[0];
-  const inRole = users.filter(u=>roleOf(u)===role);
-  const roleChip = val=>`<button class="chip ${role===val?'active':''}" onclick="Views.repRole('${val}')">${roleLabel[val]} (${users.filter(u=>roleOf(u)===val).length})</button>`;
-
-  // กราฟแท่ง (แสดงสูงสุด 20 อันดับแรก เลื่อนดูได้)
-  const maxU = Math.max(1, ...inRole.map(u=>u.count));
-  const bars = inRole.slice(0,20).map(u=>`
-    <div class="vbar" title="${esc(u.name)} · ${u.count} ครั้ง · ${u.cases.map(c=>esc(c.case)+' ('+c.count+')').join(', ')}">
-      <span class="vbar-val">${u.count}</span>
-      <span class="vbar-col ${role}" style="height:${Math.max(6, Math.round(u.count/maxU*100))}%"></span>
-      <span class="vbar-name">${esc(u.name)}</span>
-    </div>`).join('');
-
   m.innerHTML = `
     <div class="view">
-      <div class="section-head"><h2>รายงานสรุปการใช้งาน</h2><span class="hint">รวม ${rp.total||0} ครั้ง${year!=='all'?' · พ.ศ. '+esc(String(year)):''}</span>
+      <div class="section-head"><h2>รายงานสรุปการใช้งาน</h2><span class="hint">รวม ${rp.total||0} ครั้ง</span>
         <span class="topbar-spacer"></span>
         <button class="btn btn-ghost btn-sm" onclick="App.exportReport()">${svg(I.dl)}Export CSV</button></div>
       <div class="grid cols-2">
         <div class="card">
-          <div class="section-head" style="margin-bottom:10px"><h3>จัดอันดับผู้ใช้งาน</h3></div>
-          <div class="rep-tools">
-            <select class="input" style="max-width:150px" onchange="Views.repYear(this.value)">${yearOpts}</select>
-            <div class="chips">${availRoles.map(roleChip).join('')}</div>
-          </div>
-          ${inRole.length
-            ? `<div class="vchart">${bars}</div>
-               <div class="help" style="margin-top:8px">${svg(I.info)} ชี้ที่แท่งเพื่อดูรายละเอียดเคสที่ฝึก · แสดงสูงสุด 20 อันดับ (เลื่อนดูด้านข้างได้)</div>`
-            : emptyState('📊','ยังไม่มีข้อมูลการใช้งาน','')}
+          <h3 style="margin-bottom:14px">จัดอันดับผู้ใช้งาน</h3>
+          ${users.length ? pgU.slice.map(u=>`
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;font-size:.9rem;margin-bottom:5px">
+                <b>${esc(u.name)}</b><span style="color:var(--muted)">${u.count} ครั้ง</span></div>
+              <div class="report-bar"><span style="width:${Math.round(u.count/maxU*100)}%"></span></div>
+              <div class="help">${u.cases.map(c=>esc(c.case)+' ('+c.count+')').join(' · ')}</div>
+            </div>`).join('') + pgU.html : emptyState('📊','ยังไม่มีข้อมูล','')}
         </div>
         <div class="card">
           <h3 style="margin-bottom:14px">เคส/หัวข้อที่ฝึกบ่อย</h3>
@@ -1307,60 +1096,7 @@ App.saveSettings = async function(){
   State.settings = r.settings;
   Cache.set('v:settings', r.settings);
   invalidateData(); // เวลาเปิด-ปิด/จำนวนเครื่อง กระทบปฏิทินและความว่าง
-  toast('บันทึกการตั้งค่าเรียบร้อยแล้ว','ok');
-};
-
-/* ===== เปลี่ยนรหัสผ่าน (เฉพาะอาจารย์ · ต้องยืนยัน OTP ทุกครั้ง) ===== */
-Views.tchpwd = async function(m){
-  if (!State.user || State.user.role !== 'teacher'){
-    m.innerHTML = `<div class="view">${emptyState('🔒','ไม่พร้อมใช้งาน','ฟีเจอร์เปลี่ยนรหัสผ่านสำหรับบัญชีอาจารย์เท่านั้น')}</div>`;
-    return;
-  }
-  m.innerHTML = `
-    <div class="view">
-      <div class="section-head"><h2>เปลี่ยนรหัสผ่าน</h2><span class="hint">ยืนยันตัวตนด้วยรหัส OTP ที่ส่งไปยังอีเมลของคุณทุกครั้ง</span></div>
-      <div class="card" style="max-width:520px">
-        <div class="field">
-          <label for="cpNew">รหัสผ่านใหม่</label>
-          <input class="input" id="cpNew" type="password" autocomplete="new-password" placeholder="อย่างน้อย 8 ตัว มีตัวอักษร+ตัวเลข" />
-        </div>
-        <div class="field">
-          <label for="cpConfirm">ยืนยันรหัสผ่านใหม่</label>
-          <input class="input" id="cpConfirm" type="password" autocomplete="new-password" />
-        </div>
-        <div class="field">
-          <label for="cpOtp">รหัส OTP (6 หลัก)</label>
-          <div style="display:flex;gap:8px">
-            <input class="input" id="cpOtp" inputmode="numeric" maxlength="6" placeholder="กดปุ่มด้านขวาเพื่อรับรหัส" autocomplete="off" style="flex:1" />
-            <button class="btn btn-soft" onclick="App.chpwdRequestOtp()">${svg(I.info)}ขอรหัส OTP</button>
-          </div>
-          <div class="help">ระบบจะส่งรหัส OTP ไปยังอีเมลที่ผูกกับบัญชีของคุณ (ใช้ได้ 10 นาที)</div>
-        </div>
-        <button class="btn btn-primary" onclick="App.chpwdConfirm()">${svg(I.check)}บันทึกรหัสผ่านใหม่</button>
-      </div>
-    </div>`;
-};
-App.chpwdRequestOtp = async function(){
-  const btn = event.target.closest('button');
-  setLoading(btn, true);
-  const r = await api('changePasswordRequestOtp', { actor_id: State.user.user_id });
-  setLoading(btn, false, `${svg(I.info)}ขอรหัส OTP`);
-  if (r.error) return toast(r.error, 'err');
-  toast(r.message || 'ส่งรหัส OTP ไปที่อีเมลของคุณแล้ว', 'ok', { duration:5500 });
-};
-App.chpwdConfirm = async function(){
-  const btn = event.target.closest('button');
-  const np = $('cpNew').value, cf = $('cpConfirm').value, otp = $('cpOtp').value.trim();
-  if (np.length < 8) return fieldError('cpNew','รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
-  if (!/[A-Za-z]/.test(np) || !/[0-9]/.test(np)) return fieldError('cpNew','ต้องมีทั้งตัวอักษรและตัวเลข');
-  if (np !== cf) return fieldError('cpConfirm','รหัสผ่านยืนยันไม่ตรงกัน');
-  if (!/^\d{6}$/.test(otp)) return fieldError('cpOtp','กรอกรหัส OTP 6 หลัก');
-  setLoading(btn, true);
-  const r = await api('changePassword', { actor_id: State.user.user_id, otp, new_password: np });
-  setLoading(btn, false, `${svg(I.check)}บันทึกรหัสผ่านใหม่`);
-  if (r.error) return toast(r.error, 'err');
-  $('cpNew').value=''; $('cpConfirm').value=''; $('cpOtp').value='';
-  alertDialog('สำเร็จ', r.message || 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว', 'ok', 'ตกลง');
+  toast('บันทึกการตั้งค่าแล้ว','ok');
 };
 
 /* =========================================================
@@ -1500,20 +1236,7 @@ Views._tbiRender = function(m, d){
               ? 'บัญชีกลุ่มอาจารย์ · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ'
               : 'บัญชีกลุ่มนักศึกษา · เห็นรหัสผ่านหลังผู้ดูแลอนุมัติ')}</span></div>
 
-      ${admin ? `
-      <div class="card" style="margin-bottom:16px">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <b style="margin-right:4px">สรุปสถานะบัญชี:</b>
-          <span class="badge approved">นักศึกษาว่าง ${list.filter(a=>a.status==='available'&&a.account_type==='student').length}</span>
-          <span class="badge approved">อาจารย์ว่าง ${list.filter(a=>a.status==='available'&&a.account_type==='teacher').length}</span>
-          <span class="badge in">ใช้งานอยู่ ${list.filter(a=>a.status==='approved').length}</span>
-          <span class="badge pending">รออนุมัติ ${list.filter(a=>a.status==='pending').length}</span>
-          <span class="hint">· รวม ${list.length} บัญชี — การ์ด "User นักศึกษาว่างวันนี้" นับเฉพาะบัญชีนักศึกษาที่ว่าง</span>
-          <span class="topbar-spacer"></span>
-          <button class="btn btn-warn btn-sm" onclick="Views.biBulkRelease()">${svg(I.key)}คืนบัญชี</button>
-        </div>
-      </div>
-      <div class="card" style="margin-bottom:16px">
+      ${admin ? `<div class="card" style="margin-bottom:16px">
         <h3 style="margin-bottom:12px">เพิ่มบัญชีใหม่</h3>
         <div class="grid cols-3">
           <div class="field"><label for="biUser">Username (BI)</label><input class="input" id="biUser" placeholder="เช่น bcnb-bi-05" /></div>
@@ -1582,98 +1305,28 @@ function biStatusBadge(s){
 Views.biAdd = async function(){
   const username = $('biUser').value.trim(), password = $('biPass').value.trim();
   const account_type = $('biType') ? $('biType').value : 'teacher';
-  let bad = false;
-  if (!username){ fieldError('biUser','กรุณากรอก username'); bad = true; }
-  if (!password){ fieldError('biPass','กรุณากรอกรหัสผ่าน'); bad = true; }
-  if (bad) return;
-  busy('กำลังบันทึกบัญชีใหม่…');
+  if (!username || !password) return toast('กรอก username และ password','err');
   const r = await api('addBIAccount', { role:State.user.role, actor_id:State.user.user_id, username, password, account_type });
-  busyDone();
-  if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('บันทึกบัญชีใหม่แล้ว','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('เพิ่มบัญชีแล้ว','ok'); App.go('tbi');
 };
 Views.biRequest = async function(id){
   const r = await api('requestBIAccount', { account_id:id, user_id:State.user.user_id, name:State.user.name, role:State.user.role });
   if (r.error) return toast(r.error,'err'); invalidateData(); toast('ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ','ok'); App.go('tbi');
 };
 Views.biApprove = async function(id){
-  busy('กำลังบันทึกการอนุมัติ…');
   const r = await api('approveBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
-  busyDone();
-  if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('บันทึกการอนุมัติแล้ว','ok'); App.go('tbi');
+  if (r.error) return toast(r.error,'err'); invalidateData(); toast('อนุมัติแล้ว','ok'); App.go('tbi');
 };
-/* ---------- คืนบัญชีแบบเลือกหลาย user (admin) ---------- */
-Views.biBulkRelease = function(){
-  const inUse = (State._biList||[]).filter(a=>a.status!=='available');
-  if (!inUse.length) return toast('ทุกบัญชีว่างอยู่แล้ว ไม่มีบัญชีที่ต้องคืน','ok');
-  const item = a => `
-    <label class="asn-item">
-      <span class="asn-user">${svg(I.key)}${esc(a.username)}</span>
-      <span class="hint" style="font-size:.78rem">${esc(a.holder_name||'—')}</span>
-      ${biStatusBadge(a.status)}
-      <span class="topbar-spacer"></span>
-      <span class="sw"><input type="checkbox" class="rlck" value="${esc(a.account_id)}" onchange="Views.rlSync()" /><span class="sw-track"></span></span>
-    </label>`;
-  openModal(`
-    <div class="asn">
-      <h3 style="margin-bottom:6px">คืนบัญชี BI</h3>
-      <p class="modal-sub" style="margin-bottom:10px">เลือกบัญชีที่ต้องการคืนเป็นสถานะ "ว่าง" — มี ${inUse.length} บัญชีที่ถูกใช้งาน/รออนุมัติ</p>
-      <label class="asn-item" style="border-style:dashed">
-        <b>เลือกทั้งหมด</b>
-        <span class="topbar-spacer"></span>
-        <span class="sw"><input type="checkbox" onchange="Views.rlAll(this.checked)" /><span class="sw-track"></span></span>
-      </label>
-      <div class="asn-scroll">${inUse.map(item).join('')}</div>
-      <div class="modal-actions" style="margin-top:14px">
-        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
-        <button class="btn btn-warn" onclick="Views.rlConfirm()">คืนบัญชี (<span id="rlCount">0</span>)</button>
-      </div>
-    </div>`);
-};
-Views.rlAll = function(on){
-  document.querySelectorAll('.rlck').forEach(c=>{ c.checked = on; });
-  Views.rlSync();
-};
-Views.rlSync = function(){
-  const el = $('rlCount');
-  if (el) el.textContent = document.querySelectorAll('.rlck:checked').length;
-};
-Views.rlConfirm = async function(){
-  const ids = Array.from(document.querySelectorAll('.rlck:checked')).map(c=>c.value);
-  if (!ids.length) return toast('ยังไม่ได้เลือกบัญชีที่จะคืน','err');
-  App._closeModal();
-  busy('กำลังคืนบัญชี '+ids.length+' บัญชี…');
-  let r = await api('releaseBIAccounts', { account_ids: ids, role:State.user.role, user_id:State.user.user_id });
-  // เผื่อเซิร์ฟเวอร์ยังเป็นเวอร์ชันเก่า: คืนทีละบัญชี
-  if (r && r.error && String(r.error).indexOf('ไม่รู้จัก') !== -1){
-    let ok = 0;
-    for (const id of ids){
-      const x = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
-      if (x && !x.error) ok++;
-    }
-    r = { ok:true, released: ok };
-  }
-  busyDone();
-  if (r.error) return toast(r.error,'err');
-  State._biAccounts = null;   // ล้างแคชบัญชีในหน่วยความจำ (สถานะเปลี่ยน)
-  invalidateData();
-  toast('คืนบัญชีเรียบร้อยแล้ว '+(r.released!=null?r.released:ids.length)+' บัญชี','ok');
-  App.go('tbi');
-};
-
 Views.biRelease = function(id){
   confirmModal('คืนบัญชี','ปล่อยบัญชีนี้กลับเป็นสถานะว่าง?','คืนบัญชี', async ()=>{
-    busy('กำลังคืนบัญชี…');
     const r = await api('releaseBIAccount', { account_id:id, role:State.user.role, user_id:State.user.user_id });
-    busyDone();
-    if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('คืนบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('คืนบัญชีแล้ว','ok'); App.go('tbi');
   });
 };
 Views.biDelete = function(id){
   confirmModal('ลบบัญชี','ลบบัญชี BI นี้ถาวร?','ลบ', async ()=>{
-    busy('กำลังลบบัญชี…');
     const r = await api('deleteBIAccount', { account_id:id, role:State.user.role, actor_id:State.user.user_id });
-    busyDone();
-    if (r.error) return toast(r.error,'err'); State._biAccounts=null; invalidateData(); toast('ลบบัญชีเรียบร้อยแล้ว','ok'); App.go('tbi');
+    if (r.error) return toast(r.error,'err'); invalidateData(); toast('ลบบัญชีแล้ว','ok'); App.go('tbi');
   });
 };
 
@@ -1783,7 +1436,7 @@ function stat(color, icon, num, label){
   return `<div class="stat ${color}"><div class="ico">${svg(icon)}</div><div><div class="num">${num}</div><div class="lab">${label}</div></div></div>`;
 }
 function statusBadge(s){
-  const map = {pending:'รออนุมัติ', approved:'อนุมัติแล้ว', rejected:'ปฏิเสธ', cancelled:'ยกเลิก', completed:'เสร็จสิ้น'};
+  const map = {pending:'รออนุมัติ', approved:'อนุมัติแล้ว', rejected:'ปฏิเสธ', cancelled:'ยกเลิก'};
   return `<span class="badge ${s}">${map[s]||s}</span>`;
 }
 function dowLabel(k){ return {mon:'จันทร์',tue:'อังคาร',wed:'พุธ',thu:'พฤหัสบดี',fri:'ศุกร์',sat:'เสาร์',sun:'อาทิตย์'}[k]||k; }
@@ -1843,7 +1496,6 @@ function teacherBookingCard(b){
       ${admin && b.status==='pending' ? `<button class="btn btn-primary btn-sm" onclick="App.approve('${b.booking_id}')">${svg(I.check)}อนุมัติ</button>
       <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}ปฏิเสธ</button>` : ''}
       ${!admin && b.status==='pending' ? `<span class="help">รอผู้ดูแลระบบอนุมัติ</span>` : ''}
-      ${admin && b.status==='approved' ? `<button class="btn btn-primary btn-sm" onclick="App.completeBooking('${b.booking_id}')">${svg(I.check)}เสร็จสิ้น (คืนบัญชี)</button>` : ''}
       ${b.status==='approved' ? `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>` : ''}
       ${admin ? `<button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')">${svg(I.x)}ลบถาวร</button>` : ''}
     </div>
@@ -1859,24 +1511,18 @@ function rowBooking(b){
          <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}</button>`
       : '<span style="color:var(--muted)">รอผู้ดูแล</span>';
   } else if (b.status==='approved'){
-    act = (admin ? `<button class="btn btn-primary btn-sm" onclick="App.completeBooking('${b.booking_id}')" title="ปิดการจอง + คืนบัญชี">${svg(I.check)}เสร็จสิ้น</button> ` : '')
-        + `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
+    act = `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
   } else { act = '<span style="color:var(--muted)">—</span>'; }
   if (admin)
     act += ` <button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')" title="ลบถาวร">${svg(I.x)}</button>`;
   return `<tr>
     <td>${fmtThaiShort(b.date)}</td>
     <td>${esc(b.start_time)}–${esc(b.end_time)}</td>
-    <td>${b.bi_count
-      ? `<span class="badge pending">ขอ ${esc(String(b.bi_count))} เครื่อง</span>`
-      : '<span style="color:var(--muted)">—</span>'}
-      <div style="font-size:.75rem;color:var(--muted);margin-top:3px">เครื่องที่ #${b.station_no}</div></td>
+    <td>#${b.station_no}</td>
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case||'—')}</td>
     <td>${esc(b.supervisor||'—')}</td>
-    <td>${b.bi_account
-      ? `<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>`
-      : '<span style="color:var(--muted)">—</span>'}</td>
+    <td>${b.bi_account?`<span class="${isAdmin()?'':'secure'}">${esc(b.bi_account)}</span>`:(b.bi_count?`<span style="color:var(--muted)">ขอ ${esc(String(b.bi_count))}</span>`:'<span style="color:var(--muted)">—</span>')}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in==='yes'?'<span class="badge in">มาแล้ว</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td><div class="row-actions">${act}</div></td>
@@ -1917,83 +1563,16 @@ App.exportReport = async function(){
 };
 
 /* =========================================================
-   UI: snackbar / alert dialog / inline validation / loading
+   UI: toast / modal / loading
    ========================================================= */
-
-/* Snackbar: แจ้งเตือนสั้นๆ ด้านล่างจอ — ปิดเองได้ / ใส่ปุ่ม action ได้
-   toast(msg, type, { action:'เลิกทำ', onAction:fn, duration:5000 }) */
-function toast(msg, type, opts){
-  opts = opts || {};
+function toast(msg, type){
   const host = $('toastHost');
   const el = document.createElement('div');
   el.className = 'toast '+(type||'');
   const ic = type==='ok'?I.check : type==='err'?I.info : I.info;
-  el.innerHTML = svg(ic)+'<span>'+esc(msg)+'</span>'
-    + (opts.action ? `<button type="button" class="toast-act">${esc(opts.action)}</button>` : '')
-    + '<button type="button" class="toast-x" aria-label="ปิด">&times;</button>';
+  el.innerHTML = svg(ic)+'<span>'+esc(msg)+'</span>';
   host.appendChild(el);
-  const close = ()=>{ el.style.opacity='0'; el.style.transform='translateY(10px)'; setTimeout(()=>el.remove(),300); };
-  el.querySelector('.toast-x').onclick = close;
-  if (opts.action && opts.onAction){
-    el.querySelector('.toast-act').onclick = ()=>{ opts.onAction(); close(); };
-  }
-  setTimeout(close, opts.duration || 3500);
-}
-
-/* Alert Dialog: กล่องแจ้งผลแบบเต็ม ใช้กับเรื่องสำคัญ (สำเร็จ/ผิดพลาด/คำเตือน)
-   alertDialog('จองไม่สำเร็จ', 'ช่วงเวลานี้เต็มแล้ว', 'err') */
-function alertDialog(title, msg, type, okLabel, onOk){
-  const ico = type==='ok' ? I.check : (type==='warn' ? I.info : I.x);
-  const host = $('modalHost');
-  host.innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
-    <div class="modal" style="text-align:center">
-      <div class="dlg-ico ${type||'err'}">${svg(ico)}</div>
-      <h3>${esc(title)}</h3>
-      <p class="modal-sub" style="margin-bottom:0">${esc(msg||'')}</p>
-      <div class="modal-actions">
-        <button class="btn btn-primary btn-block" id="dlgOk">${esc(okLabel||'ตกลง')}</button>
-      </div>
-    </div></div>`;
-  $('dlgOk').onclick = ()=>{ App._closeModal(); if (onOk) onOk(); };
-}
-
-/* Inline Validation: ขีดแดงใต้ช่องกรอก + ข้อความบอกจุดผิดตรงช่องนั้น
-   หายเองทันทีที่ผู้ใช้เริ่มแก้ไข */
-function fieldError(id, msg){
-  const el = $(id); if (!el) return;
-  el.classList.add('invalid');
-  const holder = el.closest('.field') || el.parentElement;
-  let e = holder.querySelector('.field-error');
-  if (!e){ e = document.createElement('div'); e.className = 'field-error'; holder.appendChild(e); }
-  e.innerHTML = svg(I.info) + '<span>' + esc(msg) + '</span>';
-  const clear = ()=>clearFieldError(id);
-  el.addEventListener('input', clear, { once:true });
-  el.addEventListener('change', clear, { once:true });
-}
-function clearFieldError(id){
-  const el = $(id); if (!el) return;
-  el.classList.remove('invalid');
-  const holder = el.closest('.field') || el.parentElement;
-  const e = holder.querySelector('.field-error'); if (e) e.remove();
-}
-
-/* Loading State ระหว่างบันทึก/ลบ: overlay ทับจอ กันกดซ้ำ + บอกสถานะ
-   ใช้คู่กัน: busy('กำลังบันทึก…') → เรียก API → busyDone() → toast ผลลัพธ์ */
-function busy(msg){
-  let h = $('busyHost');
-  if (!h){ h = document.createElement('div'); h.id = 'busyHost'; document.body.appendChild(h); }
-  h.innerHTML = `<div class="busy-ovl"><div class="busy-box"><span class="spinner"></span><span>${esc(msg||'กำลังบันทึก…')}</span></div></div>`;
-}
-function busyDone(){ const h = $('busyHost'); if (h) h.innerHTML = ''; }
-
-/* Loading State: โครงร่างกะพริบ (skeleton) ระหว่างรอโหลดหน้า */
-function skeletonView(){
-  const card = (w1,w2,w3)=>`<div class="card" style="margin-bottom:14px">
-    <div class="skeleton sk-line" style="width:${w1}"></div>
-    <div class="skeleton sk-line" style="width:${w2}"></div>
-    <div class="skeleton sk-line" style="width:${w3}"></div>
-  </div>`;
-  return `<div class="view">${card('34%','72%','55%')}${card('46%','64%','38%')}</div>`;
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(10px)'; setTimeout(()=>el.remove(),300); }, 3000);
 }
 function confirmModal(title, sub, okLabel, onOk){
   const host = $('modalHost');
@@ -2030,13 +1609,13 @@ function setLoading(btn, on, restore){
 function showDemoBanner(){
   const b = document.createElement('div');
   b.className = 'demo-banner';
-  b.innerHTML = svg(I.info)+'<span><b>โหมดทดลอง (Demo)</b> — กำลังใช้ข้อมูลตัวอย่างในเครื่อง ยังไม่ได้เชื่อม Google Sheets · ตั้งค่า <code>CONFIG.API_URL</code> ใน app.js เพื่อใช้งานจริง</span>';
+  b.innerHTML = svg(I.info)+'<span><b>โหมดทดลอง (Demo)</b> — กำลังใช้ข้อมูลตัวอย่างในเครื่อง ยังไม่ได้เชื่อม Supabase · ตั้งค่า <code>CONFIG.SUPABASE_KEY</code> ใน app.js เพื่อใช้งานจริง</span>';
   document.body.prepend(b);
 }
 
 /* =========================================================
    MOCK BACKEND (โหมดทดลอง — จำลอง Apps Script + Google Sheets)
-   ใช้เมื่อยังไม่ได้ตั้งค่า CONFIG.API_URL
+   ใช้เมื่อยังไม่ได้ตั้งค่า CONFIG.SUPABASE_KEY
    ========================================================= */
 const MockAPI = (function(){
   const wk = startOfWeek(new Date());
@@ -2125,19 +1704,6 @@ const MockAPI = (function(){
   function activeOf(date){
     return bookings.filter(b=>b.date===date && (b.status==='pending'||b.status==='approved'));
   }
-  // คืนบัญชีแล้วถอดออกจากการจอง — ถ้าไม่เหลือบัญชี → ปิดเป็น completed
-  function completeBookings(freed){
-    if (!freed || !freed.length) return;
-    bookings.forEach(b=>{
-      if (b.status!=='approved') return;
-      const names = String(b.bi_account||'').split(',').map(x=>x.trim()).filter(Boolean);
-      if (!names.length) return;
-      const remaining = names.filter(n=>!freed.some(f=>f.username===n && f.holder_id===String(b.user_id)));
-      if (remaining.length===names.length) return;
-      b.bi_account = remaining.join(', ');
-      if (!remaining.length) b.status='completed';
-    });
-  }
   function steps(date){
     const day = activeOf(date);
     const out = [];
@@ -2188,29 +1754,6 @@ const MockAPI = (function(){
         if (p.close_time!==undefined) settings.close_time = p.close_time;
         return { settings: JSON.parse(JSON.stringify(settings)) };
       }
-      /* ===== โหมดทดลอง: ลืม/เปลี่ยนรหัสผ่าน (OTP ทดสอบคือ 123456) ===== */
-      case 'forgotPasswordRequest':
-        return { ok:true, message:'(โหมดทดลอง) หากอีเมลอยู่ในระบบ จะได้รับ OTP — ใช้รหัสทดสอบ 123456' };
-      case 'forgotPasswordConfirm': {
-        if (String(p.otp)!=='123456') return { error:'รหัส OTP ไม่ถูกต้อง (โหมดทดลองใช้ 123456)' };
-        if (String(p.new_password||'').length<8) return { error:'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
-        const u = users.find(x=>x.email && x.email.toLowerCase()===String(p.email||'').toLowerCase() && x.role==='teacher');
-        if (u) u.password = p.new_password;
-        return { ok:true, message:'(โหมดทดลอง) ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว' };
-      }
-      case 'changePasswordRequestOtp': {
-        const u = users.find(x=>x.user_id===String(p.actor_id));
-        if (!u || u.role!=='teacher') return { error:'ฟีเจอร์นี้สำหรับบัญชีอาจารย์เท่านั้น' };
-        return { ok:true, message:'(โหมดทดลอง) ส่ง OTP แล้ว — ใช้รหัสทดสอบ 123456' };
-      }
-      case 'changePassword': {
-        const u = users.find(x=>x.user_id===String(p.actor_id));
-        if (!u || u.role!=='teacher') return { error:'ฟีเจอร์นี้สำหรับบัญชีอาจารย์เท่านั้น' };
-        if (String(p.otp)!=='123456') return { error:'รหัส OTP ไม่ถูกต้อง (โหมดทดลองใช้ 123456)' };
-        if (String(p.new_password||'').length<8) return { error:'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' };
-        u.password = p.new_password;
-        return { ok:true, message:'(โหมดทดลอง) เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' };
-      }
       case 'getBookings': {
         let list = bookings.slice();
         if (p.user_id) list = list.filter(b=>b.user_id===String(p.user_id));
@@ -2237,8 +1780,6 @@ const MockAPI = (function(){
         if (sM%STEP_MIN!==0 || eM%STEP_MIN!==0) return { error:'เวลาต้องลงตัวเป็นช่วงละ '+STEP_MIN+' นาที' };
         if (sM<t2m(settings.open_time) || eM>t2m(settings.close_time)) return { error:'จองได้ระหว่าง '+settings.open_time+' – '+settings.close_time+' เท่านั้น' };
         if (eM-sM > settings.max_duration*60) return { error:'จองได้ไม่เกิน '+settings.max_duration+' ชั่วโมงต่อครั้ง' };
-        const biReq = parseInt(p.bi_count,10);
-        if (isNaN(biReq) || biReq < 1) return { error:'กรุณาระบุจำนวนบัญชี BI ที่ต้องการอย่างน้อย 1 บัญชี' };
         const day = activeOf(date);
         const dup = day.find(b=>b.user_id===String(p.user_id)&&overlaps(sM,eM,t2m(b.start_time),t2m(b.end_time)));
         if (dup) return { error:'คุณมีการจองที่คาบเกี่ยวช่วงเวลานี้อยู่แล้ว' };
@@ -2249,7 +1790,7 @@ const MockAPI = (function(){
         const rec = { booking_id:'BK'+(1000+seq++), user_id:String(p.user_id), name:p.name, role:p.role||'student',
           date, start_time:start, end_time:end, station_no:station, subject_case:p.subject_case||'',
           supervisor:p.supervisor||'',
-          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', bi_count:biReq, bi_account:'',
+          group_size:parseInt(p.group_size,10)||1, group_members:p.group_members||'', bi_account:'',
           status:'pending', checked_in:'no', created_at:new Date().toISOString(), note:String(p.note||'') };
         bookings.push(rec);
         return { booking: JSON.parse(JSON.stringify(rec)) };
@@ -2272,11 +1813,6 @@ const MockAPI = (function(){
         const b = bookings.find(x=>x.booking_id===p.booking_id);
         if (!b) return { error:'ไม่พบการจองนี้' };
         b.status = p.status; if (p.note!==undefined) b.note=p.note;
-        if (p.status==='completed'){
-          const names = String(b.bi_account||'').split(',').map(x=>x.trim()).filter(Boolean);
-          biAccounts.forEach(a=>{ if (names.indexOf(a.username)!==-1){ a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString(); } });
-          b.bi_account='';
-        }
         if (p.status==='approved' && p.bi_accounts && p.bi_accounts.length){
           const names=[];
           p.bi_accounts.forEach(id=>{
@@ -2339,24 +1875,8 @@ const MockAPI = (function(){
         const a = biAccounts.find(x=>x.account_id===p.account_id);
         if (!a) return { error:'ไม่พบบัญชีนี้' };
         if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return { error:'คืนได้เฉพาะบัญชีของตัวเอง' };
-        const freed = [{ holder_id:String(a.holder_id||''), username:String(a.username||'') }];
         a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
-        completeBookings(freed);
         return { ok:true };
-      }
-      case 'releaseBIAccounts': {
-        const ids = Array.isArray(p.account_ids) ? p.account_ids : String(p.account_ids||'').split(',').map(x=>x.trim()).filter(Boolean);
-        let released = 0; const freed = [];
-        ids.forEach(id=>{
-          const a = biAccounts.find(x=>x.account_id===id);
-          if (!a) return;
-          if (p.role!=='admin' && a.holder_id!==String(p.user_id||'')) return;
-          freed.push({ holder_id:String(a.holder_id||''), username:String(a.username||'') });
-          a.status='available'; a.holder_id=''; a.holder_name=''; a.updated_at=new Date().toISOString();
-          released++;
-        });
-        completeBookings(freed);
-        return { ok:true, released };
       }
       case 'deleteBIAccount': {
         if (p.role!=='admin') return { error:'เฉพาะผู้ดูแลระบบเท่านั้น' };
@@ -2370,13 +1890,10 @@ const MockAPI = (function(){
         const weekAgo = toISO(addDays(new Date(),-6));
         const weekly = bookings.filter(b=>b.date>=weekAgo && b.date<=today && b.status!=='cancelled' && b.status!=='rejected');
         const st = steps(today);
-        const freeS = biAccounts.filter(a=>a.status==='available' && (a.account_type||'teacher')==='student').length;
-        const freeT = biAccounts.filter(a=>a.status==='available' && (a.account_type||'teacher')!=='student').length;
         return { today, bookings_today:todays.length,
           pending: bookings.filter(b=>b.status==='pending').length,
           free_slots_today: st.reduce((n,s)=>n+s.free,0),
-          free_bi_student: freeS, free_bi_teacher: freeT,
-          free_bi_today: freeS + freeT,
+          free_bi_today: biAccounts.filter(a=>a.status==='available').length,
           weekly_total: weekly.length,
           checked_in_today: todays.filter(b=>b.checked_in==='yes').length };
       }

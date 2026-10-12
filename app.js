@@ -10,7 +10,7 @@
    ถ้ายังเป็นค่า PASTE_YOUR... ระบบจะทำงานในโหมดทดลอง (mock data) ให้อัตโนมัติ */
 const CONFIG = {
   SUPABASE_URL: 'https://nqmbuycfboguwhgkzgvp.supabase.co',
-  SUPABASE_KEY: 'PASTE_YOUR_PUBLISHABLE_KEY',
+  SUPABASE_KEY: 'sb_publishable_giyyTso4Hbd_xn3uxRA1eQ_VacQuF_M',
   GOOGLE_HD: 'bcn.ac.th'     // แสดงเฉพาะบัญชีโดเมนนี้ในหน้าเลือกบัญชี Google ('' = ไม่จำกัด)
 };
 

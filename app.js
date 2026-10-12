@@ -10,10 +10,18 @@
    ถ้ายังเป็นค่า PASTE_YOUR... ระบบจะทำงานในโหมดทดลอง (mock data) ให้อัตโนมัติ */
 const CONFIG = {
   SUPABASE_URL: 'https://nqmbuycfboguwhgkzgvp.supabase.co',
-  SUPABASE_KEY: 'sb_publishable_giyyTso4Hbd_xn3uxRA1eQ_VacQuF_M'
+  SUPABASE_KEY: 'PASTE_YOUR_PUBLISHABLE_KEY',
+  GOOGLE_HD: 'bcn.ac.th'     // แสดงเฉพาะบัญชีโดเมนนี้ในหน้าเลือกบัญชี Google ('' = ไม่จำกัด)
 };
 
 const MOCK_MODE = !CONFIG.SUPABASE_KEY || CONFIG.SUPABASE_KEY.indexOf('PASTE_YOUR') === 0;
+
+/* Supabase client — จัดการ Google login / session / ต่ออายุ token ให้อัตโนมัติ */
+const sb = (!MOCK_MODE && window.supabase)
+  ? window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' }
+    })
+  : null;
 const PAGE_SIZE = 10;          // จำนวนแถวต่อหน้า (ปุ่มแบ่งหน้า)
 const STEP_MIN = 30;           // ความละเอียดช่วงเวลาจอง (นาที)
 
@@ -84,23 +92,16 @@ function isStaff(){ return State.user && (State.user.role==='teacher' || State.u
 async function api(action, params){
   params = params || {};
   if (MOCK_MODE) return MockAPI.handle(action, params);
-  // แนบ session token ทุกครั้ง — เซิร์ฟเวอร์ใช้ token ตรวจสิทธิ์ (ไม่เชื่อ role ที่ส่งจากเบราว์เซอร์)
-  const p = Object.assign({}, params);
-  if (State.user && State.user.token) p.token = State.user.token;
-  const headers = { 'Content-Type': 'application/json', apikey: CONFIG.SUPABASE_KEY };
-  if (CONFIG.SUPABASE_KEY.indexOf('eyJ') === 0) headers.Authorization = 'Bearer ' + CONFIG.SUPABASE_KEY;
+  if (!sb) return { error: 'โหลดไลบรารี Supabase ไม่สำเร็จ กรุณารีเฟรชหน้า' };
   try {
-    const res = await fetch(CONFIG.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/rpc/api', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ action, p })
-    });
-    const data = await res.json();
-    if (!res.ok) return { error: (data && (data.message || data.hint)) || ('เซิร์ฟเวอร์ตอบกลับ HTTP ' + res.status) };
-    // session หมดอายุ/ไม่ถูกต้อง → ออกจากระบบอัตโนมัติ
-    if (data && data.code === 'AUTH' && State.user){
+    // supabase-js แนบ access token ของ Google login ให้เอง — เซิร์ฟเวอร์ตรวจสิทธิ์จาก token (ไม่เชื่อ role ที่ส่งมา)
+    const { data, error } = await sb.rpc('api', { action, p: params });
+    if (error) return { error: error.message || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์' };
+    // หมดสิทธิ์ระหว่างใช้งาน (session หมดอายุ / ถูกระงับ) → ออกจากระบบอัตโนมัติ
+    if (data && ['AUTH','DOMAIN','NOUSER'].indexOf(data.code) !== -1 && State.user && action !== 'me'){
       State.user = null; clearSession(); Cache.wipe();
       toast(data.error, 'err');
+      try { await sb.auth.signOut(); } catch(e){}
       setTimeout(()=>location.reload(), 1500);
     }
     return data;
@@ -204,15 +205,57 @@ function paginate(key, list){
    ========================================================= */
 const App = {
   async boot(){
-    if (MOCK_MODE) showDemoBanner();
-    const u = loadSession();
-    if (u && u.user_id && (MOCK_MODE || u.token)){   // session เก่าจาก Apps Script (ไม่มี token) → ให้เข้าสู่ระบบใหม่
-      State.user = u;
-      await App.enterApp();
-    } else {
-      $('loginView').classList.remove('hidden');
-      App.renderLoginCal();
+    if (MOCK_MODE){
+      showDemoBanner();
+      $('googleLogin').classList.add('hidden');
+      $('demoLogin').classList.remove('hidden');
+      const u = loadSession();
+      if (u && u.user_id){ State.user = u; await App.enterApp(); return; }
+      return App.showLogin();
     }
+
+    // กลับมาจากหน้า Google → supabase-js แลก code เป็น session ให้อัตโนมัติ
+    const fresh = /[?&#](code|access_token|error_description)=/.test(location.href);
+    let session = null, authErr = '';
+    try { session = (await sb.auth.getSession()).data.session; }
+    catch(e){ authErr = 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่'; }
+    const qs = new URLSearchParams(location.search + '&' + location.hash.replace(/^#/, ''));
+    if (qs.get('error_description')) authErr = qs.get('error_description');
+    if (fresh) history.replaceState(null, '', location.pathname);
+
+    if (session){
+      const r = await api('me', { fresh: fresh ? 'true' : '' });
+      if (r && r.user){
+        State.user = r.user; saveSession(r.user);
+        await App.enterApp();
+        return;
+      }
+      // อีเมลนอกโดเมน / ยังไม่ลงทะเบียน / ถูกระงับ → ออกจาก Google session
+      authErr = (r && r.error) || 'ไม่สามารถยืนยันตัวตนได้';
+      try { await sb.auth.signOut(); } catch(e){}
+    }
+    clearSession();
+    App.showLogin(authErr);
+  },
+
+  showLogin(msg){
+    $('loginView').classList.remove('hidden');
+    const box = $('loginErr');
+    if (box){ box.textContent = msg || ''; box.classList.toggle('hidden', !msg); }
+    App.renderLoginCal();
+  },
+
+  async loginGoogle(){
+    if (!sb) return toast('โหลดไลบรารี Supabase ไม่สำเร็จ กรุณารีเฟรชหน้า', 'err');
+    const btn = $('gBtn');
+    setLoading(btn, true);
+    const queryParams = { prompt: 'select_account' };
+    if (CONFIG.GOOGLE_HD) queryParams.hd = CONFIG.GOOGLE_HD;
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin + location.pathname, queryParams }
+    });
+    if (error){ setLoading(btn, false); toast(error.message, 'err'); }
   },
 
   setPage(key, p){ State._pages[key] = p; App.go(State.view); },
@@ -337,7 +380,7 @@ const App = {
 
   logout(){
     confirmModal('ออกจากระบบ', 'ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ', async ()=>{
-      try { await api('logout'); } catch(e){}   // ยกเลิก session ฝั่งเซิร์ฟเวอร์
+      if (sb){ try { await sb.auth.signOut(); } catch(e){} }   // ออกจาก Google session ของระบบ
       clearSession(); Cache.wipe(); location.reload();  // ล้างข้อมูลแคช กันข้อมูลค้างข้ามผู้ใช้
     });
   },

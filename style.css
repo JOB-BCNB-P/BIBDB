@@ -536,6 +536,20 @@ textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
   padding: 10px 14px; border: none; background: none; cursor: pointer; text-align: left;
 }
 .member-opt:hover { background: var(--mint-soft); }
+/* ---- เลือกนักศึกษาด้วยปุ่มเลข 3 ตัวท้ายของรหัส ---- */
+.stu-room { margin-bottom: 10px; }
+.stu-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.stu-btn {
+  min-width: 48px; padding: 7px 10px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--line, #DCE7E4); background: #fff; color: var(--ink);
+  font-weight: 700; font-size: .92rem; font-variant-numeric: tabular-nums;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.stu-btn:hover { background: var(--mint-soft); }
+.stu-btn.on { background: var(--mint-deep); border-color: var(--mint-deep); color: #fff; }
+.stu-btn.nocode { color: var(--muted); font-weight: 600; }
+.stu-btn:focus-visible { outline: 2px solid var(--mint-deep); outline-offset: 2px; }
+
 .member-opt .mo-name { font-weight: 600; color: var(--ink); }
 .member-opt .mo-role { font-size: .78rem; color: var(--muted); flex: none; }
 .member-empty { padding: 12px 14px; color: var(--muted); font-size: .85rem; }

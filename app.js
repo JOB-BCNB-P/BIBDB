@@ -548,7 +548,7 @@ Views.loadSlots = async function (dateISO) {
     const [av, sc, us] = await Promise.all([
       api('getAvailability', { date: dateISO }),
       Views._scnCache ? Promise.resolve(Views._scnCache) : api('getScenarios'),
-      Views._userCache ? Promise.resolve({ users: Views._userCache }) : api('getUsers')
+      Views._userCache ? Promise.resolve({ users: Views._userCache }) : api('getUsers', { role: State.user.role })
     ]);
     return {
       av,
@@ -570,11 +570,18 @@ Views._slotsRender = function (dateISO, d) {
   State._avail = av;
   Views._members = [];
 
-  const scnOptions = scnList.map(s => {
-    const label = (s.no ? s.no + ' · ' : '') + s.title + (s.level ? ' (' + s.level + ')' : '');
-    const val = (s.no ? s.no + ' · ' : '') + s.title;
-    return `<option value="${esc(val)}">${esc(label)}</option>`;
-  }).join('');
+  // คลัง Scenario สำหรับตัวเลือกแบบหลายเคส
+  Views._scnPool = scnList.map(sc => {
+    const val = (sc.no ? sc.no + ' · ' : '') + sc.title;
+    return { val, label: val + (sc.level ? ' (' + sc.level + ')' : '') };
+  });
+  Views._cases = [];
+  // คลังนักศึกษาสำหรับเลือกตามชั้นปี (ไม่รวมตัวเอง)
+  Views._stuPool = (Views._userCache || []).filter(u =>
+    u.role === 'student' && String(u.user_id) !== String(State.user.user_id));
+  const years = Array.from(new Set(Views._stuPool.map(u => Views.yearOf(u.class_group))))
+                     .filter(Boolean).sort();
+  const yearOpts = years.map(y => `<option value="${esc(y)}">ชั้นปีที่ ${esc(y)}</option>`).join('');
 
   // รายชื่ออาจารย์ (ผู้สอน/ผู้ควบคุม) — ถ้าอาจารย์เป็นผู้จอง เลือกตัวเองให้อัตโนมัติ
   const teacherOpts = (Views._userCache || []).filter(u => u.role === 'teacher').map(t =>
@@ -615,11 +622,14 @@ Views._slotsRender = function (dateISO, d) {
     <div id="bookForm">
       <div class="grid cols-2">
         <div class="field">
-          <label for="bkCase">หัวข้อ / เคสที่จะฝึก (เลือกจาก Scenarios)</label>
-          <select class="input" id="bkCase">
-            <option value="">— เลือก Scenario —</option>
-            ${scnOptions}
-          </select>
+          <label for="bkScnSearch">หัวข้อ / เคสที่จะฝึก (เลือกได้หลายเคส)</label>
+          <div class="member-picker" id="scnPicker">
+            <div id="bkScnChips" class="member-chips"></div>
+            <input class="input" id="bkScnSearch" placeholder="พิมพ์ชื่อเคสเพื่อค้นหา แล้วกดเลือก…" autocomplete="off"
+                   oninput="Views.scnPick(this.value)" onfocus="Views.scnPick(this.value)" />
+            <div id="bkScnList" class="member-list hidden"></div>
+          </div>
+          <div class="help">เลือกได้มากกว่า 1 เคสต่อการจอง 1 ครั้ง</div>
         </div>
         <div class="field">
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
@@ -643,26 +653,34 @@ Views._slotsRender = function (dateISO, d) {
         <textarea class="input" id="bkNote" rows="2" placeholder="เช่น จุดที่ต้องการเน้นฝึก อุปกรณ์เพิ่มเติม ฯลฯ"></textarea>
       </div>
       <div class="field">
-        <label for="bkMemberSearch">${isStaff() ? 'เลือกนักศึกษาที่เข้าร่วม (เลือกได้หลายคน)' : 'รายชื่อสมาชิกในกลุ่ม (ถ้ามี)'}</label>
-        <div class="member-picker" id="memberPicker">
-          <div id="bkChips" class="member-chips"></div>
-          <input class="input" id="bkMemberSearch" placeholder="พิมพ์ชื่อเพื่อค้นหา แล้วกดเลือก…" autocomplete="off"
-                 oninput="Views.memberSearch(this.value)" onfocus="Views.memberSearch(this.value)" />
-          <div id="bkMemberList" class="member-list hidden"></div>
+        <label for="bkYear">${isStaff() ? 'เลือกนักศึกษาที่เข้าร่วม (เลือกได้หลายคน)' : 'รายชื่อสมาชิกในกลุ่ม (ถ้ามี)'}</label>
+        <div id="bkChips" class="member-chips"></div>
+        <div class="grid cols-2" style="margin-bottom:8px">
+          <select class="input" id="bkYear" onchange="Views.renderStuGrid()">
+            <option value="">— เลือกชั้นปี —</option>
+            ${yearOpts}
+          </select>
+          <input class="input" id="bkStuFind" placeholder="กรองด้วยเลขท้าย หรือชื่อ…" autocomplete="off"
+                 oninput="Views.renderStuGrid()" />
         </div>
-        <div class="help">${isStaff() ? 'อาจารย์สามารถเลือกนักศึกษาเข้ากลุ่มได้หลายคน' : 'เลือกได้เฉพาะนักศึกษาด้วยกันเท่านั้น'}</div>
+        <div id="bkStuGrid"></div>
+        <div class="help">เลือกชั้นปีก่อน แล้วกดปุ่มเลข 3 ตัวท้ายของรหัสนักศึกษา · กดซ้ำเพื่อยกเลิก</div>
       </div>
       <button class="btn btn-primary btn-block" onclick="Views.submitBooking()">${svg(I.check)}ยืนยันการจอง</button>
     </div>` : emptyState('😔', 'ไม่มีช่วงเวลาว่างในวันนี้', 'กรุณาเลือกวันอื่น')}
   `;
   if (startOpts) Views.updateEnd();
 
+  Views.renderCaseChips();
+  Views.renderMemberChips();
+  Views.renderStuGrid();
+
   if (!Views._memberDocBound) {
     Views._memberDocBound = true;
     document.addEventListener('click', (e) => {
-      const mp = $('memberPicker');
-      const list = $('bkMemberList');
-      if (mp && list && !mp.contains(e.target)) list.classList.add('hidden');
+      const sp = $('scnPicker');
+      const list = $('bkScnList');
+      if (sp && list && !sp.contains(e.target)) list.classList.add('hidden');
     });
   }
 };
@@ -702,43 +720,106 @@ Views.updateFree = function () {
     : `<span class="bad">${svg(I.x)} เต็ม</span>`;
 };
 
-/* ---------- เลือกสมาชิกกลุ่ม (ค้นหาจากรายชื่อผู้ใช้) ---------- */
-Views._members = [];
-Views.memberSearch = function (q) {
-  const list = $('bkMemberList'); if (!list) return;
+/* ---------- เลือกหลาย Scenario ---------- */
+Views._scnPool = [];
+Views._cases = [];
+Views.scnPick = function (q) {
+  const list = $('bkScnList'); if (!list) return;
   q = String(q || '').trim().toLowerCase();
-  const pool = (Views._userCache || []).filter(u =>
-    u.role === 'student' &&                                    // เลือกได้เฉพาะนักศึกษา
-    String(u.user_id) !== String(State.user.user_id) &&
-    !Views._members.some(m => String(m.user_id) === String(u.user_id)) &&
-    (!q || u.name.toLowerCase().includes(q) || String(u.class_group || '').toLowerCase().includes(q))
-  );
+  const pool = (Views._scnPool || [])
+    .map((sc, i) => ({ sc, i }))
+    .filter(x => Views._cases.indexOf(x.sc.val) === -1 && (!q || x.sc.label.toLowerCase().includes(q)));
   list.innerHTML = pool.length
-    ? pool.slice(0, 8).map(u => `
-        <button type="button" class="member-opt" onclick="Views.addMember('${esc(String(u.user_id))}')">
-          <span class="mo-name">${esc(u.name)}</span>
-          <span class="mo-role">${esc(u.class_group || 'นักศึกษา')}</span>
+    ? pool.slice(0, 10).map(x => `
+        <button type="button" class="member-opt" onclick="Views.addCase(${x.i})">
+          <span class="mo-name">${esc(x.sc.label)}</span>
         </button>`).join('')
-    : '<div class="member-empty">ไม่พบรายชื่อที่ค้นหา</div>';
+    : '<div class="member-empty">ไม่พบเคสที่ค้นหา</div>';
   list.classList.remove('hidden');
 };
-Views.addMember = function (uid) {
-  const u = (Views._userCache || []).find(x => String(x.user_id) === String(uid));
+Views.addCase = function (i) {
+  const sc = (Views._scnPool || [])[i]; if (!sc) return;
+  if (Views._cases.indexOf(sc.val) === -1) Views._cases.push(sc.val);
+  const inp = $('bkScnSearch'); if (inp) { inp.value = ''; inp.focus(); }
+  const list = $('bkScnList'); if (list) list.classList.add('hidden');
+  Views.renderCaseChips();
+};
+Views.removeCase = function (i) {
+  Views._cases.splice(i, 1);
+  Views.renderCaseChips();
+};
+Views.renderCaseChips = function () {
+  const host = $('bkScnChips'); if (!host) return;
+  host.innerHTML = (Views._cases || []).map((v, i) => `
+    <span class="member-chip">
+      ${esc(v)}
+      <button type="button" onclick="Views.removeCase(${i})" aria-label="ลบเคสนี้">&times;</button>
+    </span>`).join('');
+};
+
+/* ---------- เลือกนักศึกษาที่เข้าร่วม: ชั้นปี → ปุ่มเลข 3 ตัวท้ายของรหัส ---------- */
+Views._members = [];
+Views._stuPool = [];
+/* ชั้นปีดึงจากตัวเลขตัวแรกใน class_group เช่น 'พย.2/1' → '2' */
+Views.yearOf = function (cg) {
+  const m = String(cg || '').match(/(\d+)/);
+  return m ? m[1] : '';
+};
+Views.code3Of = function (u) {
+  const c = String(u.code3 || u.student_code || '').trim();
+  return c ? c.slice(-3) : '';
+};
+Views.renderStuGrid = function () {
+  const host = $('bkStuGrid'); if (!host) return;
+  const y = ($('bkYear') && $('bkYear').value) || '';
+  const q = (($('bkStuFind') && $('bkStuFind').value) || '').trim().toLowerCase();
+  if (!y) { host.innerHTML = '<div class="member-empty">เลือกชั้นปีเพื่อแสดงรหัสนักศึกษา</div>'; return; }
+
+  let pool = (Views._stuPool || []).filter(u => Views.yearOf(u.class_group) === y);
+  if (q) pool = pool.filter(u =>
+    Views.code3Of(u).includes(q) || String(u.name || '').toLowerCase().includes(q));
+  if (!pool.length) { host.innerHTML = '<div class="member-empty">ไม่พบนักศึกษาตามเงื่อนไขนี้</div>'; return; }
+
+  // เลข 3 ตัวท้ายซ้ำกันได้ → เติมชื่อกำกับเฉพาะตัวที่ซ้ำ กันเลือกผิดคน
+  const dup = {};
+  pool.forEach(u => { const c = Views.code3Of(u); dup[c] = (dup[c] || 0) + 1; });
+
+  // จัดกลุ่มตามห้อง (class_group) เพื่อให้หาง่ายเมื่อชั้นปีมีหลายห้อง
+  const rooms = Array.from(new Set(pool.map(u => u.class_group || '—'))).sort();
+  host.innerHTML = rooms.map(room => {
+    const items = pool.filter(u => (u.class_group || '—') === room)
+      .sort((a, b) => Views.code3Of(a).localeCompare(Views.code3Of(b)));
+    return `<div class="stu-room">
+      <div class="asn-head">${esc(room)}</div>
+      <div class="stu-grid">${items.map(u => {
+        const c = Views.code3Of(u);
+        const on = Views._members.some(m => String(m.user_id) === String(u.user_id));
+        const label = c ? (dup[c] > 1 ? c + ' · ' + esc(String(u.name || '').split(' ')[0]) : c) : '—';
+        return `<button type="button" class="stu-btn${on ? ' on' : ''}${c ? '' : ' nocode'}"
+                  title="${esc(u.name || '')}${c ? ' · รหัสลงท้าย ' + c : ' · ยังไม่มีรหัสนักศึกษาในระบบ'}"
+                  onclick="Views.toggleStu('${esc(String(u.user_id))}')">${label}</button>`;
+      }).join('')}</div></div>`;
+  }).join('');
+};
+Views.toggleStu = function (uid) {
+  const u = (Views._stuPool || []).find(x => String(x.user_id) === String(uid));
   if (!u) return;
-  Views._members.push({ user_id: u.user_id, name: u.name, role: u.role });
-  const inp = $('bkMemberSearch'); if (inp) { inp.value = ''; inp.focus(); }
-  $('bkMemberList').classList.add('hidden');
+  const at = Views._members.findIndex(m => String(m.user_id) === String(uid));
+  if (at >= 0) Views._members.splice(at, 1);
+  else Views._members.push({ user_id: u.user_id, name: u.name, role: u.role, code3: Views.code3Of(u) });
   Views.renderMemberChips();
+  Views.renderStuGrid();
 };
 Views.removeMember = function (uid) {
   Views._members = Views._members.filter(m => String(m.user_id) !== String(uid));
   Views.renderMemberChips();
+  Views.renderStuGrid();
 };
 Views.renderMemberChips = function () {
   const host = $('bkChips'); if (!host) return;
   host.innerHTML = Views._members.map(m => `
     <span class="member-chip ${m.role}">
-      ${esc(m.name)}
+      ${m.code3 ? esc(m.code3) + ' · ' : ''}${esc(m.name)}
       <button type="button" onclick="Views.removeMember('${esc(String(m.user_id))}')" aria-label="ลบ ${esc(m.name)}">&times;</button>
     </span>`).join('');
   const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
@@ -748,14 +829,15 @@ Views.submitBooking = async function () {
   const start = $('bkStart') && $('bkStart').value;
   const end = $('bkEnd') && $('bkEnd').value;
   if (!start || !end) return toast('กรุณาเลือกช่วงเวลา', 'err');
-  if (!$('bkCase').value) return toast('กรุณาเลือก Scenario ที่จะฝึก', 'err');
+  if (!(Views._cases || []).length) return toast('กรุณาเลือก Scenario ที่จะฝึกอย่างน้อย 1 เคส', 'err');
   if (!$('bkTeacher').value) return toast('กรุณาเลือกอาจารย์ผู้สอน/ผู้ควบคุม', 'err');
   const btn = event.target;
   setLoading(btn, true);
   const r = await api('createBooking', {
     user_id: State.user.user_id, name: State.user.name, role: State.user.role,
     date: State.bookDate, start_time: start, end_time: end,
-    subject_case: $('bkCase').value,
+    subject_case: Views._cases.join(' | '),
+    subject_cases: Views._cases.slice(),
     supervisor: $('bkTeacher').value,
     note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value, 10) || 1,
@@ -1674,10 +1756,10 @@ const MockAPI = (function () {
     { user_id: 't001', name: 'อ.ดร. ปวีณา ใจดี', role: 'teacher', class_group: '', email: 'paweena@bcnbangkok.ac.th', password: 'teacher123' },
     { user_id: 't002', name: 'อ. สมหญิง รักเรียน', role: 'teacher', class_group: '', email: 'somying@bcnbangkok.ac.th', password: 'teacher123' },
     { user_id: 'a001', name: 'ผู้ดูแลระบบ', role: 'admin', class_group: '', email: 'admin@bcnbangkok.ac.th', password: 'admin123' },
-    { user_id: 'ST-4567-a1b2c3', cid: '1100701234567', name: 'กานต์ พยาบาลดี', role: 'student', class_group: 'พย.2/1', email: '', password: '' },
-    { user_id: 'ST-5678-d4e5f6', cid: '1100702345678', name: 'นภา ศรีสุข', role: 'student', class_group: 'พย.2/1', email: '', password: '' },
-    { user_id: 'ST-6789-g7h8i9', cid: '1100703456789', name: 'ธีรเดช มั่นคง', role: 'student', class_group: 'พย.2/2', email: '', password: '' },
-    { user_id: 'ST-7890-j1k2l3', cid: '1100704567890', name: 'พิมพ์ชนก ใจงาม', role: 'student', class_group: 'พย.2/2', email: '', password: '' },
+    { user_id: 'ST-4567-a1b2c3', cid: '1100701234567', name: 'กานต์ พยาบาลดี', role: 'student', class_group: 'พย.2/1', student_code: '6412001', email: '', password: '' },
+    { user_id: 'ST-5678-d4e5f6', cid: '1100702345678', name: 'นภา ศรีสุข', role: 'student', class_group: 'พย.2/1', student_code: '6412018', email: '', password: '' },
+    { user_id: 'ST-6789-g7h8i9', cid: '1100703456789', name: 'ธีรเดช มั่นคง', role: 'student', class_group: 'พย.2/2', student_code: '6412102', email: '', password: '' },
+    { user_id: 'ST-7890-j1k2l3', cid: '1100704567890', name: 'พิมพ์ชนก ใจงาม', role: 'student', class_group: 'พย.2/2', student_code: '6412147', email: '', password: '' },
   ];
 
   let settings = {
@@ -1770,7 +1852,13 @@ const MockAPI = (function () {
     });
   }
 
-  function strip(u) { const c = Object.assign({}, u); delete c.password; delete c.cid; return c; }
+  function strip(u, viewerRole) {
+    const c = Object.assign({}, u); delete c.password; delete c.cid;
+    c.code3 = String(u.student_code || '').slice(-3);
+    // นักศึกษาเห็นแค่ 3 ตัวท้าย · อาจารย์/ผู้ดูแลเห็นรหัสเต็ม (ตรงกับ api_get_users)
+    if (viewerRole !== 'teacher' && viewerRole !== 'admin') delete c.student_code;
+    return c;
+  }
 
   function run(action, p) {
     switch (action) {
@@ -1886,7 +1974,7 @@ const MockAPI = (function () {
         if (b.status !== 'approved') return { error: 'เช็คอินได้เฉพาะการจองที่อนุมัติแล้ว' };
         b.checked_in = 'yes'; return { ok: true };
       }
-      case 'getUsers': return { users: users.map(strip) };
+      case 'getUsers': return { users: users.map(u => strip(u, p.role)) };
       case 'getScenarios': {
         const staff = (p.role === 'teacher' || p.role === 'admin');
         return {

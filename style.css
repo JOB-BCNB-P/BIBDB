@@ -536,6 +536,27 @@ textarea.input { resize: vertical; min-height: 60px; line-height: 1.5; }
   padding: 10px 14px; border: none; background: none; cursor: pointer; text-align: left;
 }
 .member-opt:hover { background: var(--mint-soft); }
+/* ---- แถบยืนยันชื่อ + กล่องสรุปผู้ที่เลือก ---- */
+.stu-hint {
+  min-height: 34px; display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; margin-bottom: 8px; border-radius: 10px;
+  background: #F6FAF9; color: var(--muted); font-size: .9rem;
+  border: 1px dashed var(--line);
+}
+.stu-hint.on { background: var(--mint-soft); color: var(--ink); font-weight: 600; border-style: solid; border-color: var(--mint-deep); }
+
+.picked-box { margin-top: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: #fff; }
+.picked-empty { color: var(--muted); font-size: .88rem; }
+.picked-head { display: flex; align-items: center; gap: 7px; font-weight: 700; color: var(--mint-deep); margin-bottom: 8px; font-size: .92rem; }
+.picked-head svg { width: 16px; height: 16px; }
+.picked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
+.picked-list li { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 9px; background: #F6FAF9; }
+.picked-list .pk-code { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--mint-deep); flex: none; }
+.picked-list .pk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picked-list .pk-room { font-size: .8rem; color: var(--muted); flex: none; }
+.picked-list .pk-del { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: 0 4px; }
+.picked-list .pk-del:hover { color: #C0392B; }
+
 /* ---- เลือกนักศึกษาด้วยปุ่มเลข 3 ตัวท้ายของรหัส ---- */
 .stu-room { margin-bottom: 10px; }
 .stu-grid { display: flex; flex-wrap: wrap; gap: 6px; }

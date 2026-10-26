@@ -513,6 +513,7 @@ Views._sdashRender = function (m, d) {
 /* ---------- จองคิว (ทุกบทบาท: นักศึกษา / อาจารย์ / ผู้ดูแล) ----------
    เวลาแบบยืดหยุ่น: เลือกเวลาเริ่ม–สิ้นสุดเองเป็นช่วงละ 30 นาที */
 Views.sbook = async function (m) {
+  Views._draft = null;                 // เข้าหน้าจองใหม่ → ไม่สืบทอดค่าค้างจากรอบก่อน
   const open = State.settings.open_days;
   const s = State.settings;
   m.innerHTML = `
@@ -666,10 +667,27 @@ Views._slotsRender = function (dateISO, d) {
         <div id="bkStuGrid"></div>
         <div class="help">เลือกชั้นปีก่อน แล้วกดปุ่มเลข 3 ตัวท้ายของรหัสนักศึกษา · กดซ้ำเพื่อยกเลิก</div>
       </div>
-      <button class="btn btn-primary btn-block" onclick="Views.submitBooking()">${svg(I.check)}ยืนยันการจอง</button>
+      <button class="btn btn-primary btn-block" onclick="Views.submitBooking(false)">${svg(I.check)}ยืนยันการจอง</button>
+      ${isStaff() ? `<button class="btn btn-soft btn-block" style="margin-top:8px" onclick="Views.submitBooking(true)">${svg(I.plus)}บันทึก แล้วจองกลุ่มถัดไปในช่วงเวลาเดิม</button>` : ''}
     </div>` : emptyState('😔', 'ไม่มีช่วงเวลาว่างในวันนี้', 'กรุณาเลือกวันอื่น')}
   `;
   if (startOpts) Views.updateEnd();
+
+  // กลับมาจองกลุ่มถัดไป: คืนค่าเวลา/เคส/อาจารย์เดิม เหลือแค่เลือกสมาชิกใหม่
+  const dr = (Views._draft && Views._draft.date === dateISO) ? Views._draft : null;
+  if (dr && startOpts) {
+    const sEl = $('bkStart');
+    if (sEl && Array.from(sEl.options).some(o => o.value === dr.start)) {
+      sEl.value = dr.start;
+      Views.updateEnd();
+      const eEl = $('bkEnd');
+      if (eEl && Array.from(eEl.options).some(o => o.value === dr.end)) { eEl.value = dr.end; Views.updateFree(); }
+    }
+    Views._cases = (dr.cases || []).slice();
+    const tEl = $('bkTeacher'); if (tEl) tEl.value = dr.teacher || '';
+    const nEl = $('bkNote');    if (nEl) nEl.value = dr.note || '';
+    const cEl = $('bkBiCount'); if (cEl) cEl.value = dr.bi_count;
+  }
 
   Views.renderCaseChips();
   Views.renderMemberChips();
@@ -825,7 +843,7 @@ Views.renderMemberChips = function () {
   const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
 };
 
-Views.submitBooking = async function () {
+Views.submitBooking = async function (again) {
   const start = $('bkStart') && $('bkStart').value;
   const end = $('bkEnd') && $('bkEnd').value;
   if (!start || !end) return toast('กรุณาเลือกช่วงเวลา', 'err');
@@ -844,9 +862,24 @@ Views.submitBooking = async function () {
     group_members: Views._members.map(m => m.name).join(', '),
     bi_count: parseInt($('bkBiCount') && $('bkBiCount').value, 10) || 0
   });
-  setLoading(btn, false, 'ยืนยันการจอง');
+  setLoading(btn, false, again ? 'บันทึก แล้วจองกลุ่มถัดไปในช่วงเวลาเดิม' : 'ยืนยันการจอง');
   if (r.error) return toast(r.error, 'err');
   invalidateData();
+
+  if (again && isStaff()) {
+    // เก็บค่าเดิมไว้ แล้วโหลดความว่างใหม่ (เครื่องถูกใช้ไป 1 เครื่องแล้ว)
+    Views._draft = {
+      date: State.bookDate, start, end,
+      cases: (Views._cases || []).slice(),
+      teacher: $('bkTeacher').value,
+      note: $('bkNote').value.trim(),
+      bi_count: ($('bkBiCount') && $('bkBiCount').value) || '1'
+    };
+    toast('บันทึกกลุ่มนี้แล้ว · เลือกสมาชิกกลุ่มถัดไปได้เลย', 'ok');
+    Views.loadSlots(State.bookDate);
+    return;
+  }
+
   toast('จองสำเร็จ! รอผู้ดูแลระบบอนุมัติ', 'ok');
   App.go(isStaff() ? 'tbookings' : 'smine');
 };

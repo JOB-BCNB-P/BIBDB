@@ -10,7 +10,7 @@
    ถ้ายังเป็นค่า PASTE_YOUR... ระบบจะทำงานในโหมดทดลอง (mock data) ให้อัตโนมัติ */
 const CONFIG = {
   SUPABASE_URL: 'https://nqmbuycfboguwhgkzgvp.supabase.co',
-  SUPABASE_KEY: 'sb_publishable_giyyTso4Hbd_xn3uxRA1eQ_VacQuF_M',
+  SUPABASE_KEY: 'PASTE_YOUR_PUBLISHABLE_KEY',
   GOOGLE_HD: 'bcn.ac.th'     // แสดงเฉพาะบัญชีโดเมนนี้ในหน้าเลือกบัญชี Google ('' = ไม่จำกัด)
 };
 
@@ -453,6 +453,11 @@ const App = {
   },
 
   go(view){
+    // ---- Route guard: หน้าสำหรับอาจารย์/ผู้ดูแลเท่านั้น (นักศึกษาเข้าไม่ได้) ----
+    const STAFF_ONLY = ['tscenarios','tdash','tbookings','tcal','treport','tsettings'];
+    if (STAFF_ONLY.indexOf(view) >= 0 && !isStaff()) {
+      view = 'sdash';
+    }
     State._navToken = (State._navToken || 0) + 1; // กันข้อมูลหน้าเก่ามาวาดทับ
     State.view = view;
     document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.v===view));
@@ -1876,7 +1881,14 @@ const MockAPI = (function(){
         b.checked_in='yes'; return { ok:true };
       }
       case 'getUsers': return { users: users.map(strip) };
-      case 'getScenarios': return { scenarios: JSON.parse(JSON.stringify(scenarios)) };
+      case 'getScenarios': {
+        const staff = (p.role==='teacher' || p.role==='admin');
+        return { scenarios: scenarios.map(s=>{
+          const o = { no:s.no, title:s.title, level:s.level };
+          if (staff){ o.room = s.room; o.pdf = s.pdf; }   // นักศึกษาไม่เห็นห้อง/PDF
+          return o;
+        }) };
+      }
       case 'getBIAccounts': {
         const role = p.role; const uid = String(p.user_id||'');
         let list = biAccounts.map(a=>{

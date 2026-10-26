@@ -655,7 +655,6 @@ Views._slotsRender = function (dateISO, d) {
       </div>
       <div class="field">
         <label for="bkYear">${isStaff() ? 'เลือกนักศึกษาที่เข้าร่วม (เลือกได้หลายคน)' : 'รายชื่อสมาชิกในกลุ่ม (ถ้ามี)'}</label>
-        <div id="bkChips" class="member-chips"></div>
         <div class="grid cols-2" style="margin-bottom:8px">
           <select class="input" id="bkYear" onchange="Views.renderStuGrid()">
             <option value="">— เลือกชั้นปี —</option>
@@ -664,8 +663,10 @@ Views._slotsRender = function (dateISO, d) {
           <input class="input" id="bkStuFind" placeholder="กรองด้วยเลขท้าย หรือชื่อ…" autocomplete="off"
                  oninput="Views.renderStuGrid()" />
         </div>
+        <div id="bkStuHint" class="stu-hint">ชี้หรือแตะค้างที่ปุ่มเพื่อดูชื่อก่อนเลือก</div>
         <div id="bkStuGrid"></div>
         <div class="help">เลือกชั้นปีก่อน แล้วกดปุ่มเลข 3 ตัวท้ายของรหัสนักศึกษา · กดซ้ำเพื่อยกเลิก</div>
+        <div id="bkChips" class="picked-box"></div>
       </div>
       <button class="btn btn-primary btn-block" onclick="Views.submitBooking(false)">${svg(I.check)}ยืนยันการจอง</button>
       ${isStaff() ? `<button class="btn btn-soft btn-block" style="margin-top:8px" onclick="Views.submitBooking(true)">${svg(I.plus)}บันทึก แล้วจองกลุ่มถัดไปในช่วงเวลาเดิม</button>` : ''}
@@ -813,18 +814,34 @@ Views.renderStuGrid = function () {
         const c = Views.code3Of(u);
         const on = Views._members.some(m => String(m.user_id) === String(u.user_id));
         const label = c ? (dup[c] > 1 ? c + ' · ' + esc(String(u.name || '').split(' ')[0]) : c) : '—';
+        const uid = esc(String(u.user_id));
         return `<button type="button" class="stu-btn${on ? ' on' : ''}${c ? '' : ' nocode'}"
                   title="${esc(u.name || '')}${c ? ' · รหัสลงท้าย ' + c : ' · ยังไม่มีรหัสนักศึกษาในระบบ'}"
-                  onclick="Views.toggleStu('${esc(String(u.user_id))}')">${label}</button>`;
+                  onmouseenter="Views.stuHint('${uid}')" onfocus="Views.stuHint('${uid}')"
+                  onpointerdown="Views.stuHint('${uid}')" onmouseleave="Views.stuHint('')"
+                  onclick="Views.toggleStu('${uid}')">${label}</button>`;
       }).join('')}</div></div>`;
   }).join('');
+};
+/* แถบแสดงชื่อของปุ่มที่กำลังชี้/แตะ — ยืนยันก่อนกดเลือก */
+Views.stuHint = function (uid) {
+  const el = $('bkStuHint'); if (!el) return;
+  if (!uid) { el.textContent = 'ชี้หรือแตะค้างที่ปุ่มเพื่อดูชื่อก่อนเลือก'; el.classList.remove('on'); return; }
+  const u = (Views._stuPool || []).find(x => String(x.user_id) === String(uid));
+  if (!u) return;
+  const full = String(u.student_code || '').trim();
+  el.textContent = (full ? full + ' · ' : '') + (u.name || '') + ' · ' + (u.class_group || '');
+  el.classList.add('on');
 };
 Views.toggleStu = function (uid) {
   const u = (Views._stuPool || []).find(x => String(x.user_id) === String(uid));
   if (!u) return;
   const at = Views._members.findIndex(m => String(m.user_id) === String(uid));
   if (at >= 0) Views._members.splice(at, 1);
-  else Views._members.push({ user_id: u.user_id, name: u.name, role: u.role, code3: Views.code3Of(u) });
+  else Views._members.push({ user_id: u.user_id, name: u.name, role: u.role,
+                            code3: Views.code3Of(u),
+                            code: String(u.student_code || '').trim() || Views.code3Of(u),
+                            class_group: u.class_group || '' });
   Views.renderMemberChips();
   Views.renderStuGrid();
 };
@@ -835,12 +852,19 @@ Views.removeMember = function (uid) {
 };
 Views.renderMemberChips = function () {
   const host = $('bkChips'); if (!host) return;
-  host.innerHTML = Views._members.map(m => `
-    <span class="member-chip ${m.role}">
-      ${m.code3 ? esc(m.code3) + ' · ' : ''}${esc(m.name)}
-      <button type="button" onclick="Views.removeMember('${esc(String(m.user_id))}')" aria-label="ลบ ${esc(m.name)}">&times;</button>
-    </span>`).join('');
-  const size = $('bkSize'); if (size) size.value = Views._members.length + 1;
+  const n = Views._members.length;
+  host.innerHTML = n
+    ? `<div class="picked-head">${svg(I.check)} เลือกแล้ว ${n} คน — ตรวจสอบรายชื่อก่อนยืนยัน</div>
+       <ol class="picked-list">${Views._members.map(m => `
+         <li>
+           <span class="pk-code">${esc(m.code || m.code3 || '—')}</span>
+           <span class="pk-name">${esc(m.name)}</span>
+           <span class="pk-room">${esc(m.class_group || '')}</span>
+           <button type="button" class="pk-del" onclick="Views.removeMember('${esc(String(m.user_id))}')"
+                   aria-label="ลบ ${esc(m.name)}">&times;</button>
+         </li>`).join('')}</ol>`
+    : '<div class="picked-empty">ยังไม่ได้เลือกนักศึกษา</div>';
+  const size = $('bkSize'); if (size) size.value = n + 1;
 };
 
 Views.submitBooking = async function (again) {

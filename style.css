@@ -355,8 +355,9 @@ tbody tr:hover { background: #FAFCFB; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 /* ---------- Modal ---------- */
-.modal-host { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(41,70,64,.32); backdrop-filter: blur(3px); animation: rise .2s ease; }
-.modal { background: #fff; border-radius: 24px; box-shadow: var(--shadow-lg); width: 100%; max-width: 460px; padding: 26px; }
+.modal-host { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(41,70,64,.32); backdrop-filter: blur(3px); animation: rise .2s ease; overflow-y: auto; overscroll-behavior: contain; }
+.modal { background: #fff; border-radius: 24px; box-shadow: var(--shadow-lg); width: 100%; max-width: 460px; padding: 26px;
+         max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow-y: auto; overscroll-behavior: contain; }
 .modal h3 { margin-bottom: 6px; }
 .modal .modal-sub { color: var(--muted); font-size: .88rem; margin-bottom: 18px; }
 .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
@@ -702,6 +703,10 @@ body.app-blurred .secure {
 .pg-info { margin-left: auto; font-size: .8rem; color: var(--muted); }
 
 /* ---------- modal อนุมัติ + จ่ายบัญชี BI ---------- */
+/* พื้นที่เลื่อนรายการบัญชี BI ในป๊อปอัพอนุมัติการจอง */
+.asn-scroll { max-height: 46vh; max-height: 46dvh; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; margin-bottom: 4px; }
+.asn-scroll::-webkit-scrollbar { width: 8px; }
+.asn-scroll::-webkit-scrollbar-thumb { background: #CFE3DE; border-radius: 8px; }
 .asn-bk { background: #F6FAF9; border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 12px; font-size: .92rem; }
 .asn-group { margin-bottom: 10px; }
 .asn-head { font-size: .8rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }

@@ -72,6 +72,7 @@ const I = {
   heart: '<path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"' + F + '/><path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"/>',
   cap: '<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"' + F + '/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/>',
   out: '<path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"' + F + '/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/>',
+  edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"' + F + '/><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   key: '<circle cx="8" cy="14" r="4.2"' + F + '/><circle cx="8" cy="14" r="4.2"/><path d="M11 11 20 2"/><path d="M16.5 5.5 19 8M14.5 7.5 17 10"/>',
   doc: '<path d="M6 3h7l5 5v13H6z"' + F + '/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
   ext: '<path d="M5 5h6v2H7v10h10v-4h2v6H5z"' + F + '/><path d="M5 5h6v2H7v10h10v-4h2v6H5z"/><path d="M14 5h5v5M19 5l-7 7"/>',
@@ -95,7 +96,10 @@ async function api(action, params) {
   if (!sb) return { error: 'โหลดไลบรารี Supabase ไม่สำเร็จ กรุณารีเฟรชหน้า' };
   try {
     // supabase-js แนบ access token ของ Google login ให้เอง — เซิร์ฟเวอร์ตรวจสิทธิ์จาก token (ไม่เชื่อ role ที่ส่งมา)
-    const { data, error } = await sb.rpc('api', { action, p: params });
+    // แก้ไขการจอง (ผู้ดูแล) ใช้ฟังก์ชันแยก public.admin_update_booking — ไฟล์ 04_admin_edit_booking.sql
+    const { data, error } = action === 'updateBooking'
+      ? await sb.rpc('admin_update_booking', { p: params })
+      : await sb.rpc('api', { action, p: params });
     if (error) return { error: error.message || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์' };
     // หมดสิทธิ์ระหว่างใช้งาน (session หมดอายุ / ถูกระงับ) → ออกจากระบบอัตโนมัติ
     if (data && ['AUTH', 'DOMAIN', 'NOUSER'].indexOf(data.code) !== -1 && State.user && action !== 'me') {
@@ -1181,6 +1185,115 @@ App.adminDelete = function (id) {
   });
 };
 
+/* ---------- แก้ไขข้อมูลการจอง (ผู้ดูแลระบบเท่านั้น) ---------- */
+App.editBooking = async function (id) {
+  if (!isAdmin()) return toast('การแก้ไขทำได้โดยผู้ดูแลระบบเท่านั้น', 'err');
+  let b = State._bkCache[id];
+  // โหลดข้อมูลประกอบ: การจอง (ถ้ายังไม่มีในแคช) · Scenario · รายชื่ออาจารย์
+  const [bk, sc, us] = await Promise.all([
+    b ? Promise.resolve(null) : api('getBookings', {}),
+    Views._scnCache ? Promise.resolve(Views._scnCache) : api('getScenarios'),
+    Views._userCache ? Promise.resolve({ users: Views._userCache }) : api('getUsers', { role: State.user.role })
+  ]);
+  if (bk && bk.bookings) { cacheBookings(bk.bookings); b = State._bkCache[id]; }
+  if (!b) return toast('ไม่พบการจองนี้', 'err');
+  if (sc && sc.scenarios) Views._scnCache = sc;
+  if (us && us.users) Views._userCache = us.users;
+
+  const s = State.settings || { open_time: '08:00', close_time: '20:00', total_stations: 1 };
+  const openM = t2m(s.open_time || '08:00'), closeM = t2m(s.close_time || '20:00');
+  const times = [];
+  for (let m = openM; m <= closeM; m += STEP_MIN) times.push(m2t(m));
+  // ใส่ค่าเดิมไว้ด้วย แม้อยู่นอกเวลาเปิด-ปิดปัจจุบัน
+  [b.start_time, b.end_time].forEach(t => { if (t && times.indexOf(t) === -1) times.push(t); });
+  times.sort();
+  const tOpts = (sel, skipLast, skipFirst) => times
+    .filter((t, i) => !(skipLast && i === times.length - 1) && !(skipFirst && i === 0))
+    .map(t => `<option value="${t}" ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+
+  const stations = Math.max(1, parseInt(s.total_stations, 10) || 1);
+  let stOpts = `<option value="">ให้ระบบเลือกเครื่องที่ว่าง</option>`;
+  for (let i = 1; i <= stations; i++) stOpts += `<option value="${i}" ${Number(b.station_no) === i ? 'selected' : ''}>เครื่อง #${i}</option>`;
+
+  // Scenario: รายการจากคลัง + ค่าเดิม (กรณีจองหลายเคส/ข้อความอิสระ)
+  const scnVals = (((Views._scnCache || {}).scenarios) || []).map(x => (x.no ? x.no + ' · ' : '') + x.title);
+  const caseList = scnVals.map(v => `<option value="${esc(v)}"></option>`).join('');
+
+  const teachers = (Views._userCache || []).filter(u => u.role === 'teacher' || u.role === 'admin').map(u => u.name);
+  if (b.supervisor && teachers.indexOf(b.supervisor) === -1) teachers.unshift(b.supervisor);
+  const supOpts = `<option value="">— ไม่ระบุ —</option>` +
+    teachers.map(n => `<option value="${esc(n)}" ${n === b.supervisor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+
+  const statusOpts = [['pending', 'รออนุมัติ'], ['approved', 'อนุมัติแล้ว'], ['rejected', 'ปฏิเสธ'], ['cancelled', 'ยกเลิก']]
+    .map(([v, l]) => `<option value="${v}" ${b.status === v ? 'selected' : ''}>${l}</option>`).join('');
+
+  $('modalHost').innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal modal-edit">
+      <h3>${svg(I.edit)} แก้ไขข้อมูลการจอง</h3>
+      <p class="modal-sub"><b>${esc(b.name)}</b> (${esc(b.user_id)}) · รหัส ${esc(b.booking_id)}</p>
+      <div class="ed-grid">
+        <div class="field ed-full"><label for="edDate">วันที่</label>
+          <input class="input" type="date" id="edDate" value="${esc(b.date)}" /></div>
+        <div class="field"><label for="edStart">เวลาเริ่ม</label>
+          <select class="input" id="edStart">${tOpts(b.start_time, true, false)}</select></div>
+        <div class="field"><label for="edEnd">เวลาสิ้นสุด</label>
+          <select class="input" id="edEnd">${tOpts(b.end_time, false, true)}</select></div>
+        <div class="field"><label for="edStation">เครื่อง</label>
+          <select class="input" id="edStation">${stOpts}</select></div>
+        <div class="field"><label for="edStatus">สถานะ</label>
+          <select class="input" id="edStatus">${statusOpts}</select></div>
+        <div class="field ed-full"><label for="edCase">Scenario / เคส</label>
+          <input class="input" id="edCase" list="edCaseList" value="${esc(b.subject_case)}" placeholder="พิมพ์หรือเลือกจากรายการ" />
+          <datalist id="edCaseList">${caseList}</datalist></div>
+        <div class="field ed-full"><label for="edSup">อาจารย์ผู้สอน/ผู้ควบคุม</label>
+          <select class="input" id="edSup">${supOpts}</select></div>
+        <div class="field"><label for="edSize">จำนวนผู้ฝึก (คน)</label>
+          <input class="input" type="number" min="1" id="edSize" value="${esc(String(b.group_size || 1))}" /></div>
+        <div class="field"><label for="edBiCount">จำนวนบัญชี BI ที่ขอ</label>
+          <input class="input" type="number" min="0" id="edBiCount" value="${esc(String(b.bi_count || 0))}" /></div>
+        <div class="field ed-full"><label for="edMembers">รายชื่อสมาชิกกลุ่ม</label>
+          <input class="input" id="edMembers" value="${esc(b.group_members)}" placeholder="คั่นด้วย , " /></div>
+        <div class="field ed-full"><label for="edBi">บัญชี BI ที่จ่ายให้</label>
+          <input class="input" id="edBi" value="${esc(b.bi_account)}" placeholder="เช่น bi_user01, bi_user02" />
+          <div class="help">แก้ข้อความที่แสดงในการจองเท่านั้น — การจ่าย/คืนบัญชีจริงทำที่เมนู "บัญชี BI"</div></div>
+        <div class="field ed-full"><label class="ed-check"><input type="checkbox" id="edChecked" ${b.checked_in === 'yes' ? 'checked' : ''} /> เช็คอินแล้ว</label></div>
+        <div class="field ed-full"><label for="edNote">หมายเหตุ</label>
+          <textarea class="input" id="edNote" rows="2">${esc(b.note)}</textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
+        <button class="btn btn-primary" id="edSave" onclick="App.saveBookingEdit('${esc(id)}')">${svg(I.check)}บันทึก</button>
+      </div>
+    </div></div>`;
+};
+
+App.saveBookingEdit = async function (id) {
+  const start = $('edStart').value, end = $('edEnd').value, date = $('edDate').value;
+  if (!date) return toast('กรุณาเลือกวันที่', 'err');
+  if (t2m(end) <= t2m(start)) return toast('เวลาสิ้นสุดต้องหลังเวลาเริ่ม', 'err');
+  const btn = $('edSave'); setLoading(btn, true);
+  const r = await api('updateBooking', {
+    booking_id: id, date, start_time: start, end_time: end,
+    station_no: $('edStation').value,
+    status: $('edStatus').value,
+    subject_case: $('edCase').value.trim(),
+    supervisor: $('edSup').value,
+    group_size: $('edSize').value,
+    group_members: $('edMembers').value.trim(),
+    bi_count: $('edBiCount').value,
+    bi_account: $('edBi').value.trim(),
+    checked_in: $('edChecked').checked ? 'yes' : 'no',
+    note: $('edNote').value.trim()
+  });
+  setLoading(btn, false, 'บันทึก');
+  if (!r || r.error) return toast((r && r.error) || 'บันทึกไม่สำเร็จ', 'err');
+  if (r.booking) State._bkCache[id] = r.booking;
+  App._closeModal();
+  invalidateData();
+  toast('บันทึกการแก้ไขแล้ว', 'ok');
+  App.go(State.view);
+};
+
 /* ---------- อาจารย์/ผู้ดูแล: รายงาน ---------- */
 Views.treport = async function (m) {
   await viewSWR('v:treport', async () => {
@@ -1684,6 +1797,7 @@ function teacherBookingCard(b) {
       <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}ปฏิเสธ</button>` : ''}
       ${!admin && b.status === 'pending' ? `<span class="help">รอผู้ดูแลระบบอนุมัติ</span>` : ''}
       ${b.status === 'approved' ? `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>` : ''}
+      ${admin ? `<button class="btn btn-soft btn-sm" onclick="App.editBooking('${b.booking_id}')">${svg(I.edit)}แก้ไข</button>` : ''}
       ${admin ? `<button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')">${svg(I.x)}ลบถาวร</button>` : ''}
     </div>
   </div>`;
@@ -1701,7 +1815,8 @@ function rowBooking(b) {
     act = `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
   } else { act = '<span style="color:var(--muted)">—</span>'; }
   if (admin)
-    act += ` <button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')" title="ลบถาวร">${svg(I.x)}</button>`;
+    act += ` <button class="btn btn-soft btn-sm" onclick="App.editBooking('${b.booking_id}')" title="แก้ไข">${svg(I.edit)}</button>`
+         + ` <button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')" title="ลบถาวร">${svg(I.x)}</button>`;
   return `<tr>
     <td>${fmtThaiShort(b.date)}</td>
     <td>${esc(b.start_time)}–${esc(b.end_time)}</td>
@@ -1999,6 +2114,17 @@ const MockAPI = (function () {
         if (!b) return { error: 'ไม่พบการจองนี้' };
         if (p.role !== 'teacher' && p.role !== 'admin' && b.user_id !== String(p.user_id)) return { error: 'ยกเลิกได้เฉพาะของตัวเอง' };
         b.status = 'cancelled'; return { ok: true };
+      }
+      case 'updateBooking': {
+        const b = bookings.find(x => x.booking_id === p.booking_id);
+        if (!b) return { error: 'ไม่พบการจองนี้' };
+        if (t2m(p.end_time) <= t2m(p.start_time)) return { error: 'เวลาสิ้นสุดต้องหลังเวลาเริ่ม' };
+        ['date', 'start_time', 'end_time', 'status', 'subject_case', 'supervisor', 'group_members', 'bi_account', 'checked_in', 'note']
+          .forEach(k => { if (p[k] !== undefined) b[k] = p[k]; });
+        b.station_no = parseInt(p.station_no, 10) || b.station_no || 1;
+        b.group_size = parseInt(p.group_size, 10) || 1;
+        b.bi_count = parseInt(p.bi_count, 10) || 0;
+        return { ok: true, booking: JSON.parse(JSON.stringify(b)) };
       }
       case 'deleteBooking': {
         if (p.role !== 'admin') return { error: 'เฉพาะผู้ดูแลระบบเท่านั้นที่ลบได้' };

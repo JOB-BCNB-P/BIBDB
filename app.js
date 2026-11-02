@@ -72,6 +72,7 @@ const I = {
   heart: '<path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"' + F + '/><path d="M12 20.5C6.5 16.6 3 13.3 3 9.2 3 6.3 5.2 4.5 7.6 4.5c1.7 0 3.3.9 4.4 2.4 1.1-1.5 2.7-2.4 4.4-2.4C18.8 4.5 21 6.3 21 9.2c0 4.1-3.5 7.4-9 11.3z"/>',
   cap: '<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"' + F + '/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/>',
   out: '<path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"' + F + '/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/>',
+  trash: '<path d="M6 7h12l-1 13H7z"' + F + '/><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>',
   edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"' + F + '/><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   key: '<circle cx="8" cy="14" r="4.2"' + F + '/><circle cx="8" cy="14" r="4.2"/><path d="M11 11 20 2"/><path d="M16.5 5.5 19 8M14.5 7.5 17 10"/>',
   doc: '<path d="M6 3h7l5 5v13H6z"' + F + '/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
@@ -1542,8 +1543,8 @@ Adm.render = async function (host, tab) {
         oninput="Adm.setQ(this.value)" />`;
   const status = u => u.active === false ? '<span class="badge cancelled">ระงับ</span>' : '<span class="badge approved">ใช้งาน</span>';
   const acts = u => `<div class="row-actions">
-      <button class="btn btn-soft btn-sm" title="แก้ไข" onclick="Adm.edit('${esc(u.user_id)}')">${svg(I.edit)}</button>
-      ${u.user_id === State.user.user_id ? '' : `<button class="btn btn-danger btn-sm" title="ลบ" onclick="Adm.del('${esc(u.user_id)}')">${svg(I.x)}</button>`}
+      <button class="btn btn-soft btn-sm" data-tip="แก้ไขข้อมูล" aria-label="แก้ไขข้อมูล" onclick="Adm.edit('${esc(u.user_id)}')">${svg(I.edit)}</button>
+      ${u.user_id === State.user.user_id ? '' : `<button class="btn btn-danger btn-sm" data-tip="ลบผู้ใช้" aria-label="ลบผู้ใช้" onclick="Adm.del('${esc(u.user_id)}')">${svg(I.trash)}</button>`}
     </div>`;
 
   if (tab === 'perm') {
@@ -2168,7 +2169,7 @@ function teacherBookingCard(b) {
           <span>เครื่อง <b>#${b.station_no}</b></span>
           ${b.subject_case ? `<span>เคส: <b>${esc(b.subject_case)}</b></span>` : ''}
           ${b.supervisor ? `<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>` : ''}
-          ${b.group_members ? `<span>กลุ่ม: ${esc(b.group_members)}</span>` : ''}
+          ${b.group_size > 1 ? `<span>ผู้เข้าฝึก: <b>${esc(String(b.group_size))} คน</b></span>` : ''}
           ${b.bi_count ? `<span>ขอบัญชี BI: <b>${esc(String(b.bi_count))}</b></span>` : ''}
           ${b.bi_account ? `<span class="${isAdmin() ? '' : 'secure'}">บัญชี BI: <b>${esc(b.bi_account)}</b></span>` : ''}
         </div>
@@ -2181,7 +2182,7 @@ function teacherBookingCard(b) {
       ${!admin && b.status === 'pending' ? `<span class="help">รอผู้ดูแลระบบอนุมัติ</span>` : ''}
       ${b.status === 'approved' ? `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>` : ''}
       ${admin ? `<button class="btn btn-soft btn-sm" onclick="App.editBooking('${b.booking_id}')">${svg(I.edit)}แก้ไข</button>` : ''}
-      ${admin ? `<button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')">${svg(I.x)}ลบถาวร</button>` : ''}
+      ${admin ? `<button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')">${svg(I.trash)}ลบถาวร</button>` : ''}
     </div>
   </div>`;
 }
@@ -2191,15 +2192,15 @@ function rowBooking(b) {
   let act = '';
   if (b.status === 'pending') {
     act = admin
-      ? `<button class="btn btn-primary btn-sm" onclick="App.approve('${b.booking_id}')">${svg(I.check)}</button>
-         <button class="btn btn-danger btn-sm" onclick="App.reject('${b.booking_id}')">${svg(I.x)}</button>`
+      ? `<button class="btn btn-primary btn-sm" data-tip="อนุมัติ" aria-label="อนุมัติ" onclick="App.approve('${b.booking_id}')">${svg(I.check)}</button>
+         <button class="btn btn-danger btn-sm" data-tip="ปฏิเสธ" aria-label="ปฏิเสธ" onclick="App.reject('${b.booking_id}')">${svg(I.x)}</button>`
       : '<span style="color:var(--muted)">รอผู้ดูแล</span>';
   } else if (b.status === 'approved') {
-    act = `<button class="btn btn-warn btn-sm" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
+    act = `<button class="btn btn-warn btn-sm" data-tip="ยกเลิกการจอง" onclick="App.teacherCancel('${b.booking_id}')">ยกเลิก</button>`;
   } else { act = '<span style="color:var(--muted)">—</span>'; }
   if (admin)
-    act += ` <button class="btn btn-soft btn-sm" onclick="App.editBooking('${b.booking_id}')" title="แก้ไข">${svg(I.edit)}</button>`
-         + ` <button class="btn btn-danger btn-sm" onclick="App.adminDelete('${b.booking_id}')" title="ลบถาวร">${svg(I.x)}</button>`;
+    act += ` <button class="btn btn-soft btn-sm" data-tip="แก้ไขข้อมูล" aria-label="แก้ไขข้อมูล" onclick="App.editBooking('${b.booking_id}')">${svg(I.edit)}</button>`
+         + ` <button class="btn btn-danger btn-sm" data-tip="ลบถาวร" aria-label="ลบถาวร" onclick="App.adminDelete('${b.booking_id}')">${svg(I.trash)}</button>`;
   return `<tr>
     <td>${fmtThaiShort(b.date)}</td>
     <td>${esc(b.start_time)}–${esc(b.end_time)}</td>

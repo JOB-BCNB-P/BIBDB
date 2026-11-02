@@ -837,3 +837,21 @@ body.app-blurred .secure {
 .scroll-fab button:hover { background: var(--mint-soft); }
 .scroll-fab svg { width: 22px; height: 22px; }
 @media (max-width: 560px) { .scroll-fab { right: 12px; bottom: 16px; } .scroll-fab button { width: 40px; height: 40px; } }
+
+/* ===== ป้ายบอกชื่อปุ่มเมื่อชี้เมาส์ (data-tip) — แสดงทางซ้ายของปุ่ม ไม่ถูกขอบตารางตัด ===== */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip); position: absolute; right: calc(100% + 8px); top: 50%;
+  transform: translateY(-50%) translateX(4px); white-space: nowrap; pointer-events: none;
+  background: var(--ink); color: #fff; font-size: .78rem; font-weight: 500; line-height: 1;
+  padding: 7px 10px; border-radius: 8px; box-shadow: var(--shadow-sm);
+  opacity: 0; transition: opacity .12s ease, transform .12s ease; z-index: 30;
+}
+[data-tip]::before {
+  content: ''; position: absolute; right: calc(100% + 3px); top: 50%; transform: translateY(-50%);
+  border: 5px solid transparent; border-left-color: var(--ink); pointer-events: none;
+  opacity: 0; transition: opacity .12s ease; z-index: 30;
+}
+[data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transform: translateY(-50%); }
+[data-tip]:hover::before, [data-tip]:focus-visible::before { opacity: 1; }
+@media (hover: none) { [data-tip]::after, [data-tip]::before { display: none; } }

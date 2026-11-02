@@ -779,3 +779,61 @@ body.app-blurred .secure {
 .ed-check { display: inline-flex !important; align-items: center; gap: 8px; cursor: pointer; }
 .ed-check input { width: 18px; height: 18px; accent-color: var(--mint-deep); }
 @media (max-width: 560px) { .ed-grid { grid-template-columns: 1fr; } }
+
+/* ===== เลือกนักศึกษาทั้ง Sec ===== */
+.room-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.room-cnt { font-size: .8rem; color: var(--muted); }
+.room-all { margin-left: auto; }
+.room-all svg { width: 15px; height: 15px; }
+
+/* ===== ตั้งค่า: แท็บย่อย ===== */
+.set-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 2px 14px; }
+.set-tabs button {
+  border: 1px solid var(--line); cursor: pointer; padding: 8px 14px; border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.75); color: var(--muted); font: inherit; font-size: .88rem; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px; transition: background .15s, color .15s;
+}
+.set-tabs button svg { width: 16px; height: 16px; }
+.set-tabs button:hover { color: var(--ink); }
+.set-tabs button.active { background: var(--mint-soft); color: var(--mint-deep); border-color: transparent; font-weight: 600; }
+
+/* ===== ตั้งค่า: จัดการผู้ใช้ ===== */
+.adm-head { flex-wrap: wrap; align-items: center; margin-top: 0; }
+.adm-head .btn svg { width: 15px; height: 15px; }
+.adm-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.adm-tools .input { flex: 1; min-width: 200px; }
+.adm-tools .input.input-sm { flex: 0 1 auto; min-width: 120px; }
+.input.input-sm { padding: 7px 10px; font-size: .85rem; min-height: 0; }
+.adm-table td { vertical-align: middle; }
+.adm-table .row-actions { display: flex; gap: 6px; }
+.adm-table .row-actions svg { width: 15px; height: 15px; }
+.sub-id { font-size: .75rem; color: var(--muted); }
+.muted { color: var(--muted); }
+.warn-txt { color: #c46a2b; font-size: .82rem; }
+.role-tag { display: inline-block; padding: 4px 10px; border-radius: var(--radius-pill); font-size: .8rem; font-weight: 600; }
+.role-tag.r-admin { background: var(--blush-soft); color: var(--blush-deep); }
+.role-tag.r-teacher { background: var(--sky-soft); color: var(--sky-deep); }
+.role-tag.r-student { background: var(--mint-soft); color: var(--mint-deep); }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; cursor: pointer; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: #d5dfdc; border-radius: 22px; transition: background .2s; }
+.switch span::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.switch input:checked + span { background: var(--mint-deep); }
+.switch input:checked + span::before { transform: translateX(18px); }
+.switch input:focus-visible + span { outline: 2px solid var(--sky-deep); outline-offset: 2px; }
+.imp-area { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; }
+.imp-prev { margin-top: 10px; }
+.imp-list { margin: 0; padding-left: 20px; font-size: .85rem; display: grid; gap: 3px; max-height: 180px; overflow-y: auto; }
+
+/* ===== ปุ่มเลื่อนหน้าขึ้น/ลง ===== */
+.scroll-fab { position: fixed; right: 18px; bottom: 22px; z-index: 80; display: flex; flex-direction: column; gap: 8px; }
+.scroll-fab button {
+  width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); cursor: pointer;
+  background: #fff; color: var(--mint-deep); box-shadow: var(--shadow);
+  display: grid; place-items: center; opacity: 0; pointer-events: none; transform: translateY(8px);
+  transition: opacity .2s, transform .2s, background .15s;
+}
+.scroll-fab button.show { opacity: 1; pointer-events: auto; transform: none; }
+.scroll-fab button:hover { background: var(--mint-soft); }
+.scroll-fab svg { width: 22px; height: 22px; }
+@media (max-width: 560px) { .scroll-fab { right: 12px; bottom: 16px; } .scroll-fab button { width: 40px; height: 40px; } }

@@ -73,6 +73,7 @@ const I = {
   cap: '<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"' + F + '/><path d="M2.5 9.5 12 5l9.5 4.5L12 14 2.5 9.5z"/><path d="M6.5 11.4v4.1c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.1"/><path d="M21.5 9.5v4.2"/>',
   out: '<path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"' + F + '/><path d="M14 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h7"/><path d="M16 15.5 19.5 12 16 8.5M19.5 12H9.5"/>',
   trash: '<path d="M6 7h12l-1 13H7z"' + F + '/><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>',
+  upload: '<path d="M5 13.5v3A3.5 3.5 0 0 0 8.5 20h7a3.5 3.5 0 0 0 3.5-3.5v-3"' + F + '/><path d="M5 13.5v3A3.5 3.5 0 0 0 8.5 20h7a3.5 3.5 0 0 0 3.5-3.5v-3"/><path d="M12 14V4.5M8.3 8.2 12 4.5l3.7 3.7"/>',
   edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"' + F + '/><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   key: '<circle cx="8" cy="14" r="4.2"' + F + '/><circle cx="8" cy="14" r="4.2"/><path d="M11 11 20 2"/><path d="M16.5 5.5 19 8M14.5 7.5 17 10"/>',
   doc: '<path d="M6 3h7l5 5v13H6z"' + F + '/><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/><path d="M9 13h6M9 16.5h6"/>',
@@ -1571,7 +1572,8 @@ Adm.render = async function (host, tab) {
   } else if (tab === 'teachers') {
     head = `<h3>รายชื่ออาจารย์</h3><span class="hint">${cnt('teacher')} คน</span>
       <span class="topbar-spacer"></span>
-      <button class="btn btn-soft btn-sm" onclick="Adm.importOpen('teacher')">${svg(I.dl)}นำเข้าหลายคน</button>
+      <button class="btn btn-soft btn-sm" onclick="Adm.downloadTemplate('teacher')">${svg(I.doc)}ดาวน์โหลดแบบฟอร์ม</button>
+      <button class="btn btn-soft btn-sm" onclick="Adm.importOpen('teacher', true)">${svg(I.upload)}อัปโหลด CSV</button>
       <button class="btn btn-primary btn-sm" onclick="Adm.edit('', 'teacher')">${svg(I.plus)}เพิ่มอาจารย์</button>`;
     tools = `${search('ค้นหาชื่อ / อีเมล…')}${stChips}`;
     cols = '<th>#</th><th>ชื่อ-สกุล</th><th>อีเมล (Google)</th><th>การจอง</th><th>สถานะ</th><th>จัดการ</th>';
@@ -1587,7 +1589,8 @@ Adm.render = async function (host, tab) {
     const secs = Array.from(new Set(stu.map(Adm.secOf))).filter(Boolean).sort();
     head = `<h3>รายชื่อนักศึกษา</h3><span class="hint">${stu.length} คน</span>
       <span class="topbar-spacer"></span>
-      <button class="btn btn-soft btn-sm" onclick="Adm.importOpen('student')">${svg(I.dl)}นำเข้าหลายคน</button>
+      <button class="btn btn-soft btn-sm" onclick="Adm.downloadTemplate('student')">${svg(I.doc)}ดาวน์โหลดแบบฟอร์ม</button>
+      <button class="btn btn-soft btn-sm" onclick="Adm.importOpen('student', true)">${svg(I.upload)}อัปโหลด CSV</button>
       <button class="btn btn-primary btn-sm" onclick="Adm.edit('', 'student')">${svg(I.plus)}เพิ่มนักศึกษา</button>`;
     tools = `${search('ค้นหารหัส / ชื่อ / อีเมล…')}
       <select class="input input-sm" style="max-width:150px" onchange="Adm.setF('year', this.value)">
@@ -1719,29 +1722,100 @@ Adm.del = function (uid) {
 };
 
 /* ---------- นำเข้าหลายคน (วางจาก Excel / Google Sheets) ---------- */
-Adm.importOpen = function (role) {
+/* แบบฟอร์ม CSV สำหรับกรอกรายชื่อ (เปิดด้วย Excel / Google Sheets ได้ ภาษาไทยไม่เพี้ยน) */
+Adm.TEMPLATE = {
+  student: {
+    file: 'แบบฟอร์มรายชื่อนักศึกษา.csv',
+    head: ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'อีเมล', 'ชั้นปี', 'Sec'],
+    ex: [['6712345001', '(ตัวอย่าง) นางสาวสมใจ ใจดี', '6712345001@bcn.ac.th', '1', 'A'],
+         ['6712345002', '(ตัวอย่าง) นายสมชาย รักเรียน', '6712345002@bcn.ac.th', '1', 'B']]
+  },
+  teacher: {
+    file: 'แบบฟอร์มรายชื่ออาจารย์.csv',
+    head: ['ชื่อ-สกุล', 'อีเมล'],
+    ex: [['(ตัวอย่าง) ผศ.สมหญิง รักเรียน', 'somying@bcn.ac.th']]
+  }
+};
+Adm.downloadTemplate = function (role) {
+  const t = Adm.TEMPLATE[role];
+  downloadCSV(t.file, [t.head].concat(t.ex));
+  toast('ดาวน์โหลดแบบฟอร์มแล้ว — แถวที่มีคำว่า (ตัวอย่าง) จะไม่ถูกนำเข้า', 'ok');
+};
+
+Adm.importOpen = function (role, pickFile) {
   const isStu = role === 'student';
-  const cols = isStu ? 'รหัสนักศึกษา | ชื่อ-สกุล | อีเมล | ชั้นปี | Sec' : 'ชื่อ-สกุล | อีเมล';
+  const t = Adm.TEMPLATE[role];
+  const cols = t.head.join(' | ');
   const ex = isStu ? '6712345001\tนางสาวสมใจ ใจดี\t6712345001@bcn.ac.th\t1\tA\n6712345002\tนายสมชาย รักเรียน\t6712345002@bcn.ac.th\t1\tB'
                    : 'ผศ.อุบล สุทธิเนียม\tubon@bcn.ac.th\nอ.สมหญิง รักเรียน\tsomying@bcn.ac.th';
   $('modalHost').innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
     <div class="modal modal-edit">
-      <h3>${svg(I.dl)} นำเข้ารายชื่อ${isStu ? 'นักศึกษา' : 'อาจารย์'}หลายคน</h3>
-      <p class="modal-sub">คัดลอกจาก Excel / Google Sheets แล้ววางด้านล่าง (1 แถว = 1 คน) เรียงคอลัมน์:<br><b>${cols}</b></p>
-      <textarea class="input imp-area" id="impText" rows="9" placeholder="${esc(ex)}" oninput="Adm.importPreview('${role}')"></textarea>
-      <div class="help">คั่นคอลัมน์ด้วย Tab (วางจาก Excel) หรือ จุลภาค · แถวหัวตารางจะถูกข้ามอัตโนมัติ · อีเมลที่มีอยู่แล้ว = อัปเดตข้อมูลคนเดิม</div>
+      <h3>${svg(I.upload)} นำเข้ารายชื่อ${isStu ? 'นักศึกษา' : 'อาจารย์'}</h3>
+      <p class="modal-sub">อัปโหลดไฟล์ .csv ตามแบบฟอร์ม หรือคัดลอกจาก Excel / Google Sheets มาวาง (1 แถว = 1 คน) เรียงคอลัมน์:<br><b>${cols}</b></p>
+      <div class="imp-file">
+        <button type="button" class="btn btn-soft btn-sm" onclick="Adm.downloadTemplate('${role}')">${svg(I.doc)}ดาวน์โหลดแบบฟอร์ม .csv</button>
+        <label class="btn btn-primary btn-sm imp-pick">${svg(I.upload)}เลือกไฟล์ .csv
+          <input type="file" id="impFile" accept=".csv,.txt,text/csv" class="sr-only" onchange="Adm.importFile(this, '${role}')" /></label>
+        <span id="impFileName" class="help" style="margin:0"></span>
+      </div>
+      <textarea class="input imp-area" id="impText" rows="8" placeholder="${esc(ex)}" oninput="Adm.importPreview('${role}')"></textarea>
+      <div class="help">แถวหัวตาราง และแถวที่มีคำว่า (ตัวอย่าง) จะถูกข้ามอัตโนมัติ · อีเมลที่มีอยู่แล้ว = อัปเดตข้อมูลคนเดิม</div>
       <div id="impPrev" class="imp-prev"></div>
       <div class="modal-actions">
         <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
         <button class="btn btn-primary" id="impGo" onclick="Adm.importRun('${role}')" disabled>${svg(I.check)}นำเข้า</button>
       </div>
     </div></div>`;
+  if (pickFile) setTimeout(() => { const f = $('impFile'); if (f) f.click(); }, 60);
+};
+
+/* อ่านไฟล์ CSV: รองรับ UTF-8 (มี/ไม่มี BOM) และไฟล์ภาษาไทยจาก Excel แบบเก่า (Windows-874) */
+Adm.importFile = function (input, role) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (f.size > 5 * 1024 * 1024) { input.value = ''; return toast('ไฟล์ใหญ่เกิน 5 MB', 'err'); }
+  const rd = new FileReader();
+  rd.onload = () => {
+    const buf = new Uint8Array(rd.result);
+    let text = new TextDecoder('utf-8').decode(buf);
+    if (text.indexOf('�') >= 0) {
+      try { text = new TextDecoder('windows-874').decode(buf); } catch (e) { }
+    }
+    text = text.replace(/^﻿/, '');
+    $('impText').value = text;
+    $('impFileName').textContent = '📄 ' + f.name;
+    Adm.importPreview(role);
+    input.value = '';
+  };
+  rd.onerror = () => toast('อ่านไฟล์ไม่สำเร็จ', 'err');
+  rd.readAsArrayBuffer(f);
+};
+
+/* แยกข้อความเป็นตาราง: Tab (วางจาก Excel) หรือ CSV มาตรฐาน (รองรับ "..." , ; ) */
+Adm.parseTable = function (text) {
+  text = String(text || '').replace(/^﻿/, '');
+  const first = text.split(/\r?\n/).find(l => l.trim()) || '';
+  const sep = first.indexOf('\t') >= 0 ? '\t' : (first.split(';').length > first.split(',').length ? ';' : ',');
+  const out = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += ch;
+    } else if (ch === '"' && cell === '') q = true;
+    else if (ch === sep) { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); out.push(row); row = []; cell = '';
+    } else cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); out.push(row); }
+  return out.map(r => r.map(c => c.trim())).filter(r => r.some(c => c));
 };
 Adm.parseImport = function (text, role) {
   const rows = [];
-  String(text || '').split(/\r?\n/).forEach(line => {
-    if (!line.trim()) return;
-    const c = (line.indexOf('\t') >= 0 ? line.split('\t') : line.split(',')).map(x => x.trim());
+  Adm.parseTable(text).forEach(c => {
+    if (c.some(x => /\(ตัวอย่าง\)/.test(x))) return;                              // แถวตัวอย่างในแบบฟอร์ม
     if (role === 'student') {
       if (!/\d/.test(c[0] || '') && /รหัส|code|id/i.test(c[0] || '')) return;   // แถวหัวตาราง
       rows.push({ role: 'student', student_code: c[0] || '', name: c[1] || '', email: c[2] || '',

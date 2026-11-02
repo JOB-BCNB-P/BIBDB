@@ -97,9 +97,12 @@ async function api(action, params) {
   try {
     // supabase-js แนบ access token ของ Google login ให้เอง — เซิร์ฟเวอร์ตรวจสิทธิ์จาก token (ไม่เชื่อ role ที่ส่งมา)
     // แก้ไขการจอง (ผู้ดูแล) ใช้ฟังก์ชันแยก public.admin_update_booking — ไฟล์ 04_admin_edit_booking.sql
+    // จัดการผู้ใช้ (ผู้ดูแล) → public.admin_users — ไฟล์ 05_admin_users.sql
     const { data, error } = action === 'updateBooking'
       ? await sb.rpc('admin_update_booking', { p: params })
-      : await sb.rpc('api', { action, p: params });
+      : action === 'adminUsers'
+        ? await sb.rpc('admin_users', { action: params.op, p: params })
+        : await sb.rpc('api', { action, p: params });
     if (error) return { error: error.message || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์' };
     // หมดสิทธิ์ระหว่างใช้งาน (session หมดอายุ / ถูกระงับ) → ออกจากระบบอัตโนมัติ
     if (data && ['AUTH', 'DOMAIN', 'NOUSER'].indexOf(data.code) !== -1 && State.user && action !== 'me') {
@@ -178,13 +181,14 @@ function clearSession() { localStorage.removeItem(SESSION_KEY); }
 /* =========================================================
    ปุ่มแบ่งหน้า (Pagination) — ใช้กับทุกรายการที่เกิน 10 แถว
    ========================================================= */
-function paginate(key, list) {
+function paginate(key, list, size) {
+  const PS = size || PAGE_SIZE;
   const total = list.length;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(total / PS));
   let page = Math.min(State._pages[key] || 1, pages);
   State._pages[key] = page;
-  const slice = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  if (total <= PAGE_SIZE) return { slice, html: '' };
+  const slice = list.slice((page - 1) * PS, page * PS);
+  if (total <= PS) return { slice, html: '' };
 
   // เลขหน้าแบบย่อ: 1 … ก่อนหน้า ปัจจุบัน ถัดไป … สุดท้าย
   const nums = new Set([1, pages, page - 1, page, page + 1]);
@@ -583,8 +587,8 @@ Views._slotsRender = function (dateISO, d) {
   Views._cases = [];
   // คลังนักศึกษาสำหรับเลือกตามชั้นปี (ไม่รวมตัวเอง)
   Views._stuPool = (Views._userCache || []).filter(u =>
-    u.role === 'student' && String(u.user_id) !== String(State.user.user_id));
-  const years = Array.from(new Set(Views._stuPool.map(u => Views.yearOf(u.class_group))))
+    u.role === 'student' && u.active !== false && String(u.user_id) !== String(State.user.user_id));
+  const years = Array.from(new Set(Views._stuPool.map(u => Views.yearOfU(u))))
                      .filter(Boolean).sort();
   const yearOpts = years.map(y => `<option value="${esc(y)}">ชั้นปีที่ ${esc(y)}</option>`).join('');
 
@@ -638,7 +642,7 @@ Views._slotsRender = function (dateISO, d) {
         </div>
         <div class="field">
           <label for="bkSize">จำนวนผู้เข้าฝึก (คน)</label>
-          <input class="input" id="bkSize" type="number" min="1" max="20" value="1" />
+          <input class="input" id="bkSize" type="number" min="1" max="300" value="1" />
         </div>
         <div class="field">
           <label for="bkBiCount">จำนวนบัญชี BI ที่ต้องการใช้</label>
@@ -669,7 +673,7 @@ Views._slotsRender = function (dateISO, d) {
         </div>
         <div id="bkStuHint" class="stu-hint">ชี้หรือแตะค้างที่ปุ่มเพื่อดูชื่อก่อนเลือก</div>
         <div id="bkStuGrid"></div>
-        <div class="help">เลือกชั้นปีก่อน แล้วกดปุ่มเลข 3 ตัวท้ายของรหัสนักศึกษา · กดซ้ำเพื่อยกเลิก</div>
+        <div class="help">เลือกชั้นปีก่อน แล้วกดปุ่มเลข 3 ตัวท้ายของรหัสนักศึกษา · กดซ้ำเพื่อยกเลิก · หรือกด <b>“เลือกทั้ง Sec”</b> เพื่อเลือกทั้งห้องในครั้งเดียว</div>
         <div id="bkChips" class="picked-box"></div>
       </div>
       <button class="btn btn-primary btn-block" onclick="Views.submitBooking(false)">${svg(I.check)}ยืนยันการจอง</button>
@@ -788,6 +792,38 @@ Views.yearOf = function (cg) {
   const m = String(cg || '').match(/(\d+)/);
   return m ? m[1] : '';
 };
+/* ชั้นปี/Sec ของนักศึกษา: ใช้ year_level / section ถ้ามี ไม่งั้นแยกจาก class_group เช่น "ปี 2 Sec A" */
+Views.yearOfU = function (u) { return u && u.year_level ? String(u.year_level) : Views.yearOf(u && u.class_group); };
+Views.secOf = function (u) {
+  if (!u) return '';
+  if (u.section) return String(u.section).toUpperCase();
+  const m = String(u.class_group || '').match(/sec(?:tion)?\.?\s*([A-Za-z0-9]+)/i);
+  return m ? m[1].toUpperCase() : '';
+};
+/* ห้อง (กลุ่มปุ่ม) ของนักศึกษา: "Sec A" ถ้ารู้ sec ไม่งั้นใช้ class_group เดิม */
+Views.roomOf = function (u) { const s = Views.secOf(u); return s ? 'Sec ' + s : (u.class_group || '—'); };
+/* เลือก/ยกเลิกทั้ง Sec ของชั้นปีที่เลือก (ไม่สนคำค้น) */
+Views.toggleRoom = function (i) {
+  const room = (Views._rooms || [])[i]; if (room == null) return;
+  const y = ($('bkYear') && $('bkYear').value) || '';
+  const items = (Views._stuPool || []).filter(u => Views.yearOfU(u) === y && Views.roomOf(u) === room);
+  const allOn = items.length && items.every(u => Views._members.some(m => String(m.user_id) === String(u.user_id)));
+  if (allOn) {
+    const ids = new Set(items.map(u => String(u.user_id)));
+    Views._members = Views._members.filter(m => !ids.has(String(m.user_id)));
+  } else {
+    items.forEach(u => {
+      if (!Views._members.some(m => String(m.user_id) === String(u.user_id)))
+        Views._members.push({ user_id: u.user_id, name: u.name, role: u.role, code3: Views.code3Of(u),
+                              code: String(u.student_code || '').trim() || Views.code3Of(u), class_group: u.class_group || '' });
+    });
+  }
+  Views.renderMemberChips();
+  Views.renderStuGrid();
+  toast(allOn ? `ยกเลิก ${room} แล้ว` : `เลือก ${room} (${items.length} คน) แล้ว`, 'ok');
+};
+/* ล้างรายชื่อที่เลือกทั้งหมด */
+Views.clearMembers = function () { Views._members = []; Views.renderMemberChips(); Views.renderStuGrid(); };
 Views.code3Of = function (u) {
   const c = String(u.code3 || u.student_code || '').trim();
   return c ? c.slice(-3) : '';
@@ -798,7 +834,8 @@ Views.renderStuGrid = function () {
   const q = (($('bkStuFind') && $('bkStuFind').value) || '').trim().toLowerCase();
   if (!y) { host.innerHTML = '<div class="member-empty">เลือกชั้นปีเพื่อแสดงรหัสนักศึกษา</div>'; return; }
 
-  let pool = (Views._stuPool || []).filter(u => Views.yearOf(u.class_group) === y);
+  const yearPool = (Views._stuPool || []).filter(u => Views.yearOfU(u) === y);
+  let pool = yearPool;
   if (q) pool = pool.filter(u =>
     Views.code3Of(u).includes(q) || String(u.name || '').toLowerCase().includes(q));
   if (!pool.length) { host.innerHTML = '<div class="member-empty">ไม่พบนักศึกษาตามเงื่อนไขนี้</div>'; return; }
@@ -807,13 +844,22 @@ Views.renderStuGrid = function () {
   const dup = {};
   pool.forEach(u => { const c = Views.code3Of(u); dup[c] = (dup[c] || 0) + 1; });
 
-  // จัดกลุ่มตามห้อง (class_group) เพื่อให้หาง่ายเมื่อชั้นปีมีหลายห้อง
-  const rooms = Array.from(new Set(pool.map(u => u.class_group || '—'))).sort();
-  host.innerHTML = rooms.map(room => {
-    const items = pool.filter(u => (u.class_group || '—') === room)
+  // จัดกลุ่มตาม Sec (หรือห้องเดิม) — แต่ละ Sec มีปุ่ม "เลือกทั้ง Sec"
+  const rooms = Array.from(new Set(pool.map(Views.roomOf))).sort();
+  Views._rooms = rooms;
+  host.innerHTML = rooms.map((room, ri) => {
+    const items = pool.filter(u => Views.roomOf(u) === room)
       .sort((a, b) => Views.code3Of(a).localeCompare(Views.code3Of(b)));
+    const whole = yearPool.filter(u => Views.roomOf(u) === room);
+    const nOn = whole.filter(u => Views._members.some(m => String(m.user_id) === String(u.user_id))).length;
+    const allOn = whole.length && nOn === whole.length;
     return `<div class="stu-room">
-      <div class="asn-head">${esc(room)}</div>
+      <div class="room-head">
+        <span class="asn-head" style="margin:0">ชั้นปีที่ ${esc(y)} · ${esc(room)}</span>
+        <span class="room-cnt">${nOn}/${whole.length} คน</span>
+        <button type="button" class="btn btn-sm ${allOn ? 'btn-soft' : 'btn-primary'} room-all" onclick="Views.toggleRoom(${ri})">
+          ${allOn ? svg(I.x) + 'ยกเลิกทั้ง ' + esc(room) : svg(I.check) + 'เลือกทั้ง ' + esc(room) + ' (' + whole.length + ' คน)'}</button>
+      </div>
       <div class="stu-grid">${items.map(u => {
         const c = Views.code3Of(u);
         const on = Views._members.some(m => String(m.user_id) === String(u.user_id));
@@ -858,7 +904,8 @@ Views.renderMemberChips = function () {
   const host = $('bkChips'); if (!host) return;
   const n = Views._members.length;
   host.innerHTML = n
-    ? `<div class="picked-head">${svg(I.check)} เลือกแล้ว ${n} คน — ตรวจสอบรายชื่อก่อนยืนยัน</div>
+    ? `<div class="picked-head">${svg(I.check)} เลือกแล้ว ${n} คน — ตรวจสอบรายชื่อก่อนยืนยัน
+         <button type="button" class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="Views.clearMembers()">ล้างทั้งหมด</button></div>
        <ol class="picked-list">${Views._members.map(m => `
          <li>
            <span class="pk-code">${esc(m.code || m.code3 || '—')}</span>
@@ -1072,7 +1119,7 @@ Views._tdashRender = function (m, d) {
         <div class="section-head"><h3>คำขอที่รออนุมัติ</h3><span class="hint">${pend.length} รายการ${isAdmin() ? '' : ' · อนุมัติโดยผู้ดูแลระบบเท่านั้น'}</span>
           <span class="topbar-spacer"></span>
           <button class="btn btn-ghost btn-sm" onclick="App.go('tbookings')">ดูทั้งหมด</button></div>
-        ${pend.length ? pend.slice(0, 6).map(b => teacherBookingCard(b)).join('') : emptyState('✅', 'ไม่มีคำขอค้างอยู่', 'การจองทุกรายการได้รับการพิจารณาแล้ว')}
+        ${pend.length ? (() => { const pg = paginate('tdash_p', pend, 5); return pg.slice.map(b => teacherBookingCard(b)).join('') + pg.html; })() : emptyState('✅', 'ไม่มีคำขอค้างอยู่', 'การจองทุกรายการได้รับการพิจารณาแล้ว')}
       </div>
     </div>`;
 };
@@ -1339,11 +1386,28 @@ Views._treportRender = function (m, d) {
 
 /* ---------- ผู้ดูแล: ตั้งค่า (เวลาเปิด-ปิดแบบยืดหยุ่น) ---------- */
 Views.tsettings = async function (m) {
+  // แท็บย่อย: ตั้งค่าระบบ · สิทธิ์ผู้ใช้งาน · รายชื่ออาจารย์ · รายชื่อนักศึกษา (3 แท็บหลังสำหรับผู้ดูแลระบบ)
+  const tabs = [['sys', I.gear, 'ตั้งค่าระบบ']];
+  if (isAdmin()) tabs.push(['perm', I.key, 'สิทธิ์ผู้ใช้งาน'], ['teachers', I.user, 'รายชื่ออาจารย์'], ['students', I.cap, 'รายชื่อนักศึกษา']);
+  if (!tabs.some(t => t[0] === State._setTab)) State._setTab = 'sys';
+  const tabBar = tabs.length > 1 ? `<div class="set-tabs">${tabs.map(([k, ic, l]) =>
+    `<button class="${State._setTab === k ? 'active' : ''}" onclick="Views.setTab('${k}')">${svg(ic)}${l}</button>`).join('')}</div>` : '';
+  if (State._setTab !== 'sys') {
+    m.innerHTML = `<div class="view">
+      <div class="section-head"><h2>ตั้งค่า</h2><span class="hint">จัดการผู้ใช้งานระบบ</span></div>
+      ${tabBar}<div class="card" id="admHost"></div></div>`;
+    return Adm.render($('admHost'), State._setTab);
+  }
+  Views._sysSettings(m, tabBar);
+};
+Views.setTab = function (k) { State._setTab = k; Adm.f.q = ''; App.go('tsettings'); };
+Views._sysSettings = function (m, tabBar) {
   const s = State.settings;
   const allDays = [['mon', 'จันทร์'], ['tue', 'อังคาร'], ['wed', 'พุธ'], ['thu', 'พฤหัสบดี'], ['fri', 'ศุกร์'], ['sat', 'เสาร์'], ['sun', 'อาทิตย์']];
   m.innerHTML = `
     <div class="view">
-      <div class="section-head"><h2>ตั้งค่าระบบ</h2><span class="hint">กำหนดเครื่อง เวลาเปิด-ปิด และวันเปิดจอง</span></div>
+      <div class="section-head"><h2>ตั้งค่า</h2><span class="hint">กำหนดเครื่อง เวลาเปิด-ปิด และวันเปิดจอง</span></div>
+      ${tabBar}
       <div class="card" style="max-width:620px">
         <div class="field">
           <label for="setStations">จำนวนเครื่อง / license ที่มี</label>
@@ -1397,6 +1461,325 @@ App.saveSettings = async function () {
   Cache.set('v:settings', r.settings);
   invalidateData(); // เวลาเปิด-ปิด/จำนวนเครื่อง กระทบปฏิทินและความว่าง
   toast('บันทึกการตั้งค่าแล้ว', 'ok');
+};
+
+/* =========================================================
+   ตั้งค่า › จัดการผู้ใช้งาน (ผู้ดูแลระบบเท่านั้น)
+   2.1 สิทธิ์ผู้ใช้งาน · 2.2 รายชื่ออาจารย์ · 2.3 รายชื่อนักศึกษา
+   เรียกเซิร์ฟเวอร์ผ่าน public.admin_users — ไฟล์ 05_admin_users.sql
+   ========================================================= */
+const ROLE_TH = { admin: 'ผู้ดูแลระบบ', teacher: 'อาจารย์', student: 'นักศึกษา' };
+const Adm = {
+  users: null,          // แคชรายชื่อทั้งหมด (โหลดครั้งแรกที่เปิดแท็บ)
+  f: { q: '', role: 'all', year: '', sec: '', st: 'all' },
+  _t: null
+};
+Adm.load = async function (force) {
+  if (Adm.users && !force) return Adm.users;
+  const r = await api('adminUsers', { op: 'list' });
+  if (r && r.error) { toast(r.error, 'err'); return null; }
+  Adm.users = (r && r.users) || [];
+  return Adm.users;
+};
+Adm.refresh = function () {
+  Adm.users = null; Views._userCache = null;   // ให้หน้าจองโหลดรายชื่อใหม่
+  invalidateData();
+  App.go('tsettings');
+};
+Adm.yearOf = u => u.year_level ? String(u.year_level) : Views.yearOf(u.class_group);
+Adm.secOf = u => Views.secOf(u);
+
+/* ค้นหา/กรอง — เก็บตำแหน่งเคอร์เซอร์ไว้ เพื่อพิมพ์ต่อได้หลังวาดใหม่ */
+Adm.setQ = function (v) {
+  Adm.f.q = v; State._pages['adm_' + State._setTab] = 1;
+  clearTimeout(Adm._t);
+  Adm._t = setTimeout(() => {
+    const el = document.activeElement;
+    Adm._refocus = (el && el.id === 'admQ') ? el.selectionStart : null;
+    App.go('tsettings');
+  }, 250);
+};
+Adm.setF = function (k, v) { Adm.f[k] = v; State._pages['adm_' + State._setTab] = 1; App.go('tsettings'); };
+Adm.focusSearch = function () {
+  const el = $('admQ');
+  if (el && Adm._refocus != null) {
+    const n = Math.min(Adm._refocus, el.value.length);
+    el.focus({ preventScroll: true }); el.setSelectionRange(n, n);
+  }
+  Adm._refocus = null;
+};
+
+Adm.filtered = function (tab) {
+  const f = Adm.f, q = f.q.trim().toLowerCase();
+  let list = (Adm.users || []).slice();
+  if (tab === 'teachers') list = list.filter(u => u.role === 'teacher');
+  else if (tab === 'students') list = list.filter(u => u.role === 'student');
+  else if (f.role !== 'all') list = list.filter(u => u.role === f.role);
+  if (tab === 'students') {
+    if (f.year) list = list.filter(u => Adm.yearOf(u) === f.year);
+    if (f.sec) list = list.filter(u => Adm.secOf(u) === f.sec);
+  }
+  if (f.st === 'on') list = list.filter(u => u.active !== false);
+  if (f.st === 'off') list = list.filter(u => u.active === false);
+  if (q) list = list.filter(u => [u.name, u.email, u.student_code, u.user_id, u.class_group]
+    .some(x => String(x || '').toLowerCase().includes(q)));
+  return list;
+};
+
+Adm.render = async function (host, tab) {
+  host.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลดรายชื่อ…</div>';
+  const all = await Adm.load();
+  if (!all) { host.innerHTML = emptyState('⚠️', 'โหลดรายชื่อไม่สำเร็จ', 'ตรวจสอบว่ารันไฟล์ 05_admin_users.sql ใน Supabase แล้ว'); return; }
+  const list = Adm.filtered(tab);
+  const pg = paginate('adm_' + tab, list);
+  const cnt = r => all.filter(u => u.role === r).length;
+  const f = Adm.f;
+  const chip = (k, v, label) => `<button class="chip ${f[k] === v ? 'active' : ''}" onclick="Adm.setF('${k}','${v}')">${label}</button>`;
+
+  let head = '', tools = '', cols = '', rows = '';
+  const stChips = `<div class="chips">${chip('st', 'all', 'ทุกสถานะ')}${chip('st', 'on', 'ใช้งาน')}${chip('st', 'off', 'ระงับ')}</div>`;
+  const search = (ph) => `<input class="input" id="admQ" placeholder="${ph}" value="${esc(f.q)}"
+        oninput="Adm.setQ(this.value)" />`;
+  const status = u => u.active === false ? '<span class="badge cancelled">ระงับ</span>' : '<span class="badge approved">ใช้งาน</span>';
+  const acts = u => `<div class="row-actions">
+      <button class="btn btn-soft btn-sm" title="แก้ไข" onclick="Adm.edit('${esc(u.user_id)}')">${svg(I.edit)}</button>
+      ${u.user_id === State.user.user_id ? '' : `<button class="btn btn-danger btn-sm" title="ลบ" onclick="Adm.del('${esc(u.user_id)}')">${svg(I.x)}</button>`}
+    </div>`;
+
+  if (tab === 'perm') {
+    head = `<h3>สิทธิ์ผู้ใช้งาน</h3><span class="hint">ทั้งหมด ${all.length} คน · ผู้ดูแล ${cnt('admin')} · อาจารย์ ${cnt('teacher')} · นักศึกษา ${cnt('student')}</span>
+      <span class="topbar-spacer"></span>
+      <button class="btn btn-primary btn-sm" onclick="Adm.edit('', 'teacher')">${svg(I.plus)}เพิ่มผู้ใช้</button>`;
+    tools = `${search('ค้นหาชื่อ / อีเมล…')}
+      <div class="chips">${chip('role', 'all', 'ทุกบทบาท')}${chip('role', 'admin', 'ผู้ดูแลระบบ')}${chip('role', 'teacher', 'อาจารย์')}${chip('role', 'student', 'นักศึกษา')}</div>${stChips}`;
+    cols = '<th>ชื่อ-สกุล</th><th>อีเมล (Google)</th><th>บทบาท / สิทธิ์</th><th>สถานะ</th><th>จัดการ</th>';
+    rows = pg.slice.map(u => `<tr>
+      <td><b>${esc(u.name)}</b>${u.user_id === State.user.user_id ? ' <span class="badge in">คุณ</span>' : ''}
+        <div class="sub-id">${esc(u.user_id)}</div></td>
+      <td>${u.email ? esc(u.email) : '<span class="warn-txt">ยังไม่มีอีเมล — เข้าระบบไม่ได้</span>'}</td>
+      <td>${u.user_id === State.user.user_id
+          ? `<span class="role-tag r-${u.role}">${ROLE_TH[u.role]}</span>`
+          : `<select class="input input-sm" onchange="Adm.quickRole('${esc(u.user_id)}', this.value)">
+               ${['admin', 'teacher', 'student'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ROLE_TH[r]}</option>`).join('')}
+             </select>`}</td>
+      <td>${u.user_id === State.user.user_id ? status(u)
+          : `<label class="switch" title="เปิด/ระงับการเข้าใช้"><input type="checkbox" ${u.active !== false ? 'checked' : ''}
+               onchange="Adm.quickActive('${esc(u.user_id)}', this.checked)"/><span></span></label>`}</td>
+      <td>${acts(u)}</td></tr>`).join('');
+
+  } else if (tab === 'teachers') {
+    head = `<h3>รายชื่ออาจารย์</h3><span class="hint">${cnt('teacher')} คน</span>
+      <span class="topbar-spacer"></span>
+      <button class="btn btn-soft btn-sm" onclick="Adm.importOpen('teacher')">${svg(I.dl)}นำเข้าหลายคน</button>
+      <button class="btn btn-primary btn-sm" onclick="Adm.edit('', 'teacher')">${svg(I.plus)}เพิ่มอาจารย์</button>`;
+    tools = `${search('ค้นหาชื่อ / อีเมล…')}${stChips}`;
+    cols = '<th>#</th><th>ชื่อ-สกุล</th><th>อีเมล (Google)</th><th>การจอง</th><th>สถานะ</th><th>จัดการ</th>';
+    rows = pg.slice.map((u, i) => `<tr>
+      <td class="muted">${(State._pages['adm_' + tab] - 1) * PAGE_SIZE + i + 1}</td>
+      <td><b>${esc(u.name)}</b></td>
+      <td>${u.email ? esc(u.email) : '<span class="warn-txt">ยังไม่มีอีเมล</span>'}</td>
+      <td>${u.bookings || 0}</td><td>${status(u)}</td><td>${acts(u)}</td></tr>`).join('');
+
+  } else {
+    const stu = all.filter(u => u.role === 'student');
+    const years = Array.from(new Set(stu.map(Adm.yearOf))).filter(Boolean).sort();
+    const secs = Array.from(new Set(stu.map(Adm.secOf))).filter(Boolean).sort();
+    head = `<h3>รายชื่อนักศึกษา</h3><span class="hint">${stu.length} คน</span>
+      <span class="topbar-spacer"></span>
+      <button class="btn btn-soft btn-sm" onclick="Adm.importOpen('student')">${svg(I.dl)}นำเข้าหลายคน</button>
+      <button class="btn btn-primary btn-sm" onclick="Adm.edit('', 'student')">${svg(I.plus)}เพิ่มนักศึกษา</button>`;
+    tools = `${search('ค้นหารหัส / ชื่อ / อีเมล…')}
+      <select class="input input-sm" style="max-width:150px" onchange="Adm.setF('year', this.value)">
+        <option value="">ทุกชั้นปี</option>${years.map(y => `<option value="${esc(y)}" ${f.year === y ? 'selected' : ''}>ชั้นปีที่ ${esc(y)}</option>`).join('')}
+      </select>
+      <select class="input input-sm" style="max-width:130px" onchange="Adm.setF('sec', this.value)">
+        <option value="">ทุก Sec</option>${secs.map(s => `<option value="${esc(s)}" ${f.sec === s ? 'selected' : ''}>Sec ${esc(s)}</option>`).join('')}
+      </select>${stChips}`;
+    cols = '<th>รหัสนักศึกษา</th><th>ชื่อ-สกุล</th><th>ชั้นปี</th><th>Sec</th><th>อีเมล (Google)</th><th>สถานะ</th><th>จัดการ</th>';
+    rows = pg.slice.map(u => `<tr>
+      <td>${esc(u.student_code || '—')}</td><td><b>${esc(u.name)}</b></td>
+      <td>${esc(Adm.yearOf(u) || '—')}</td><td>${esc(Adm.secOf(u) || '—')}</td>
+      <td>${u.email ? esc(u.email) : '<span class="warn-txt">ยังไม่มีอีเมล</span>'}</td>
+      <td>${status(u)}</td><td>${acts(u)}</td></tr>`).join('');
+  }
+
+  host.innerHTML = `
+    <div class="section-head adm-head">${head}</div>
+    <div class="adm-tools">${tools}</div>
+    ${list.length ? `<div class="table-wrap"><table class="adm-table">
+        <thead><tr>${cols}</tr></thead><tbody>${rows}</tbody></table></div>${pg.html}`
+      : emptyState('🔍', 'ไม่พบรายชื่อ', 'ลองเปลี่ยนคำค้นหรือตัวกรอง')}`;
+  Adm.focusSearch();
+};
+
+/* ---------- เพิ่ม / แก้ไขผู้ใช้ (modal) ---------- */
+Adm.edit = function (uid, presetRole) {
+  const u = uid ? (Adm.users || []).find(x => x.user_id === uid) : null;
+  if (uid && !u) return toast('ไม่พบผู้ใช้นี้', 'err');
+  const d = u || { name: '', email: '', role: presetRole || 'student', student_code: '', year_level: '', section: '', active: true };
+  const self = u && u.user_id === State.user.user_id;
+  const yr = u ? Adm.yearOf(u) : '';
+  const sec = u ? Adm.secOf(u) : '';
+  const yOpts = ['', '1', '2', '3', '4'].concat(yr && ['1', '2', '3', '4'].indexOf(yr) < 0 ? [yr] : [])
+    .map(y => `<option value="${y}" ${String(yr) === y ? 'selected' : ''}>${y ? 'ชั้นปีที่ ' + y : '— เลือก —'}</option>`).join('');
+  const sOpts = ['', 'A', 'B'].concat(sec && ['A', 'B'].indexOf(sec) < 0 ? [sec] : [])
+    .map(s => `<option value="${s}" ${sec === s ? 'selected' : ''}>${s ? 'Sec ' + s : '— เลือก —'}</option>`).join('');
+  $('modalHost').innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal modal-edit">
+      <h3>${svg(u ? I.edit : I.plus)} ${u ? 'แก้ไขข้อมูลผู้ใช้' : 'เพิ่มผู้ใช้ใหม่'}</h3>
+      <p class="modal-sub">${u ? esc(u.user_id) + (u.bookings ? ' · มีประวัติการจอง ' + u.bookings + ' รายการ' : '') : 'ผู้ใช้จะเข้าสู่ระบบด้วยบัญชี Google ตามอีเมลที่กรอก'}</p>
+      <div class="ed-grid">
+        <div class="field ed-full"><label for="auName">ชื่อ-สกุล *</label>
+          <input class="input" id="auName" value="${esc(d.name)}" placeholder="เช่น ผศ.อุบล สุทธิเนียม" /></div>
+        <div class="field ed-full"><label for="auEmail">อีเมล Google ของวิทยาลัยฯ</label>
+          <input class="input" id="auEmail" type="email" value="${esc(d.email)}" placeholder="name@bcn.ac.th" />
+          <div class="help">ต้องมีอีเมลจึงจะเข้าสู่ระบบได้</div></div>
+        <div class="field"><label for="auRole">บทบาท / สิทธิ์</label>
+          <select class="input" id="auRole" ${self ? 'disabled' : ''} onchange="Adm.toggleStuFields()">
+            ${['student', 'teacher', 'admin'].map(r => `<option value="${r}" ${d.role === r ? 'selected' : ''}>${ROLE_TH[r]}</option>`).join('')}
+          </select>
+          ${self ? '<div class="help">ไม่สามารถเปลี่ยนสิทธิ์ของตัวเองได้</div>' : ''}</div>
+        <div class="field"><label>สถานะ</label>
+          <label class="ed-check" style="margin-top:10px"><input type="checkbox" id="auActive" ${d.active !== false ? 'checked' : ''} ${self ? 'disabled' : ''} /> เปิดใช้งาน</label></div>
+        <div class="ed-full stu-only">
+          <div class="ed-grid">
+            <div class="field ed-full"><label for="auCode">รหัสนักศึกษา</label>
+              <input class="input" id="auCode" value="${esc(d.student_code || '')}" inputmode="numeric" /></div>
+            <div class="field"><label for="auYear">ชั้นปี</label><select class="input" id="auYear">${yOpts}</select></div>
+            <div class="field"><label for="auSec">Sec</label><select class="input" id="auSec">${sOpts}</select></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
+        <button class="btn btn-primary" id="auSave" onclick="Adm.save('${esc(uid || '')}')">${svg(I.check)}บันทึก</button>
+      </div>
+    </div></div>`;
+  Adm.toggleStuFields();
+  setTimeout(() => { const n = $('auName'); if (n && !u) n.focus(); }, 50);
+};
+Adm.toggleStuFields = function () {
+  const r = $('auRole') && $('auRole').value;
+  document.querySelectorAll('.stu-only').forEach(el => el.classList.toggle('hidden', r !== 'student'));
+};
+Adm.save = async function (uid) {
+  const name = $('auName').value.trim();
+  if (!name) return toast('กรุณากรอกชื่อ-สกุล', 'err');
+  const p = {
+    op: 'save', user_id: uid, name,
+    email: $('auEmail').value.trim(),
+    role: $('auRole').value,
+    active: $('auActive').checked,
+    student_code: $('auCode').value.trim(),
+    year_level: $('auYear').value,
+    section: $('auSec').value
+  };
+  const btn = $('auSave'); setLoading(btn, true);
+  const r = await api('adminUsers', p);
+  setLoading(btn, false, 'บันทึก');
+  if (!r || r.error) return toast((r && r.error) || 'บันทึกไม่สำเร็จ', 'err');
+  App._closeModal();
+  toast(uid ? 'บันทึกการแก้ไขแล้ว' : 'เพิ่มผู้ใช้แล้ว', 'ok');
+  Adm.refresh();
+};
+/* เปลี่ยนบทบาท / เปิด-ระงับ จากตารางโดยตรง */
+Adm._patch = async function (uid, patch, okMsg) {
+  const u = (Adm.users || []).find(x => x.user_id === uid);
+  if (!u) return;
+  const r = await api('adminUsers', Object.assign({
+    op: 'save', user_id: u.user_id, name: u.name, email: u.email, role: u.role, active: u.active !== false,
+    student_code: u.student_code || '', year_level: u.year_level || '', section: u.section || '', class_group: u.class_group || ''
+  }, patch));
+  if (!r || r.error) { toast((r && r.error) || 'บันทึกไม่สำเร็จ', 'err'); return App.go('tsettings'); }
+  toast(okMsg, 'ok');
+  Adm.refresh();
+};
+Adm.quickRole = function (uid, role) {
+  const u = (Adm.users || []).find(x => x.user_id === uid);
+  confirmModal('เปลี่ยนสิทธิ์ผู้ใช้', `เปลี่ยน "${u ? u.name : uid}" เป็น ${ROLE_TH[role]} ใช่หรือไม่?`, 'ยืนยัน',
+    () => Adm._patch(uid, { role, class_group: role === 'student' ? (u && u.class_group) || '' : '' }, 'เปลี่ยนสิทธิ์แล้ว'));
+  // ปิด modal โดยไม่ยืนยัน → คืนค่า select เดิม
+  const host = $('modalHost');
+  const restore = () => { if (!host.innerHTML) App.go('tsettings'); };
+  setTimeout(() => host.querySelectorAll('.btn-soft, .modal-host').forEach(el => el.addEventListener('click', () => setTimeout(restore, 0))), 0);
+};
+Adm.quickActive = function (uid, on) {
+  Adm._patch(uid, { active: on }, on ? 'เปิดใช้งานแล้ว' : 'ระงับการเข้าใช้แล้ว');
+};
+Adm.del = function (uid) {
+  const u = (Adm.users || []).find(x => x.user_id === uid);
+  if (!u) return;
+  confirmModal('ลบผู้ใช้', `ลบ "${u.name}" ออกจากระบบ?${u.bookings ? ` (ประวัติการจอง ${u.bookings} รายการยังเก็บไว้)` : ''} — ถ้าเพียงต้องการปิดการเข้าใช้ ให้ใช้ "ระงับ" แทน`, 'ลบ', async () => {
+    const r = await api('adminUsers', { op: 'delete', user_id: uid });
+    if (!r || r.error) return toast((r && r.error) || 'ลบไม่สำเร็จ', 'err');
+    toast('ลบผู้ใช้แล้ว', 'ok');
+    Adm.refresh();
+  });
+};
+
+/* ---------- นำเข้าหลายคน (วางจาก Excel / Google Sheets) ---------- */
+Adm.importOpen = function (role) {
+  const isStu = role === 'student';
+  const cols = isStu ? 'รหัสนักศึกษา | ชื่อ-สกุล | อีเมล | ชั้นปี | Sec' : 'ชื่อ-สกุล | อีเมล';
+  const ex = isStu ? '6712345001\tนางสาวสมใจ ใจดี\t6712345001@bcn.ac.th\t1\tA\n6712345002\tนายสมชาย รักเรียน\t6712345002@bcn.ac.th\t1\tB'
+                   : 'ผศ.อุบล สุทธิเนียม\tubon@bcn.ac.th\nอ.สมหญิง รักเรียน\tsomying@bcn.ac.th';
+  $('modalHost').innerHTML = `<div class="modal-host" onclick="if(event.target===this)App._closeModal()">
+    <div class="modal modal-edit">
+      <h3>${svg(I.dl)} นำเข้ารายชื่อ${isStu ? 'นักศึกษา' : 'อาจารย์'}หลายคน</h3>
+      <p class="modal-sub">คัดลอกจาก Excel / Google Sheets แล้ววางด้านล่าง (1 แถว = 1 คน) เรียงคอลัมน์:<br><b>${cols}</b></p>
+      <textarea class="input imp-area" id="impText" rows="9" placeholder="${esc(ex)}" oninput="Adm.importPreview('${role}')"></textarea>
+      <div class="help">คั่นคอลัมน์ด้วย Tab (วางจาก Excel) หรือ จุลภาค · แถวหัวตารางจะถูกข้ามอัตโนมัติ · อีเมลที่มีอยู่แล้ว = อัปเดตข้อมูลคนเดิม</div>
+      <div id="impPrev" class="imp-prev"></div>
+      <div class="modal-actions">
+        <button class="btn btn-soft" onclick="App._closeModal()">ยกเลิก</button>
+        <button class="btn btn-primary" id="impGo" onclick="Adm.importRun('${role}')" disabled>${svg(I.check)}นำเข้า</button>
+      </div>
+    </div></div>`;
+};
+Adm.parseImport = function (text, role) {
+  const rows = [];
+  String(text || '').split(/\r?\n/).forEach(line => {
+    if (!line.trim()) return;
+    const c = (line.indexOf('\t') >= 0 ? line.split('\t') : line.split(',')).map(x => x.trim());
+    if (role === 'student') {
+      if (!/\d/.test(c[0] || '') && /รหัส|code|id/i.test(c[0] || '')) return;   // แถวหัวตาราง
+      rows.push({ role: 'student', student_code: c[0] || '', name: c[1] || '', email: c[2] || '',
+                  year_level: (c[3] || '').replace(/\D/g, ''), section: (c[4] || '').replace(/^sec\s*/i, '').toUpperCase() });
+    } else {
+      if (/^ชื่อ|^name/i.test(c[0] || '')) return;
+      rows.push({ role: 'teacher', name: c[0] || '', email: c[1] || '' });
+    }
+  });
+  return rows;
+};
+Adm.importPreview = function (role) {
+  const rows = Adm.parseImport($('impText').value, role);
+  const host = $('impPrev'); const go = $('impGo');
+  go.disabled = !rows.length;
+  if (!rows.length) { host.innerHTML = ''; return; }
+  const bad = rows.filter(r => !r.name).length;
+  const show = rows.slice(0, 5).map(r => `<li>${role === 'student' ? esc(r.student_code) + ' · ' : ''}<b>${esc(r.name || '(ไม่มีชื่อ)')}</b> · ${esc(r.email || 'ไม่มีอีเมล')}${role === 'student' ? ` · ปี ${esc(r.year_level || '?')} Sec ${esc(r.section || '?')}` : ''}</li>`).join('');
+  host.innerHTML = `<div class="picked-head">${svg(I.check)} พบ ${rows.length} แถว${bad ? ` · <span class="warn-txt">${bad} แถวไม่มีชื่อ (จะถูกข้าม)</span>` : ''}</div>
+    <ol class="imp-list">${show}${rows.length > 5 ? `<li class="muted">… และอีก ${rows.length - 5} แถว</li>` : ''}</ol>`;
+};
+Adm.importRun = async function (role) {
+  const rows = Adm.parseImport($('impText').value, role);
+  if (!rows.length) return;
+  const btn = $('impGo'); setLoading(btn, true);
+  const r = await api('adminUsers', { op: 'import', rows });
+  setLoading(btn, false, 'นำเข้า');
+  if (!r || r.error) return toast((r && r.error) || 'นำเข้าไม่สำเร็จ', 'err');
+  const errs = r.errors || [];
+  if (errs.length) {
+    $('impPrev').innerHTML = `<div class="picked-head">เพิ่มใหม่ ${r.created} · อัปเดต ${r.updated} · <span class="warn-txt">ไม่สำเร็จ ${errs.length} แถว</span></div>
+      <ol class="imp-list">${errs.slice(0, 20).map(e => `<li>แถว ${e.row} ${esc(e.name || '')}: <span class="warn-txt">${esc(e.error)}</span></li>`).join('')}</ol>`;
+    Adm.users = null; Views._userCache = null;
+    $('impGo').outerHTML = `<button class="btn btn-primary" onclick="App._closeModal();Adm.refresh()">${svg(I.check)}เสร็จสิ้น</button>`;
+    return;
+  }
+  App._closeModal();
+  toast(`นำเข้าแล้ว · เพิ่มใหม่ ${r.created} · อัปเดต ${r.updated}`, 'ok');
+  Adm.refresh();
 };
 
 /* =========================================================
@@ -1902,6 +2285,32 @@ function openModal(html, wide) {
     </div></div>`;
 }
 
+/* ปุ่มเลื่อนหน้าขึ้นบนสุด / ลงล่างสุด (ลอยมุมขวาล่าง) */
+function initScrollFab() {
+  if ($('scrollFab')) return;
+  const d = document.createElement('div');
+  d.id = 'scrollFab'; d.className = 'scroll-fab';
+  d.innerHTML = `<button type="button" id="fabUp" title="เลื่อนขึ้นบนสุด" aria-label="เลื่อนขึ้นบนสุด"
+      onclick="window.scrollTo({top:0,behavior:'smooth'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></svg></button>
+    <button type="button" id="fabDown" title="เลื่อนลงล่างสุด" aria-label="เลื่อนลงล่างสุด"
+      onclick="window.scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10l6 6 6-6"/></svg></button>`;
+  document.body.appendChild(d);
+  let raf = 0;
+  const upd = () => {
+    raf = 0;
+    const y = window.scrollY, max = document.documentElement.scrollHeight - window.innerHeight;
+    $('fabUp').classList.toggle('show', y > 300);
+    $('fabDown').classList.toggle('show', max - y > 300);
+  };
+  const later = () => { if (!raf) raf = requestAnimationFrame(upd); };
+  window.addEventListener('scroll', later, { passive: true });
+  window.addEventListener('resize', later);
+  new MutationObserver(later).observe(document.body, { childList: true, subtree: true });
+  upd();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initScrollFab);
+else setTimeout(initScrollFab, 0);
+
 function setLoading(btn, on, restore) {
   if (!btn) return;
   if (on) { btn.dataset._t = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>'; }
@@ -1928,10 +2337,10 @@ const MockAPI = (function () {
     { user_id: 't001', name: 'อ.ดร. ปวีณา ใจดี', role: 'teacher', class_group: '', email: 'paweena@bcnbangkok.ac.th', password: 'teacher123' },
     { user_id: 't002', name: 'อ. สมหญิง รักเรียน', role: 'teacher', class_group: '', email: 'somying@bcnbangkok.ac.th', password: 'teacher123' },
     { user_id: 'a001', name: 'ผู้ดูแลระบบ', role: 'admin', class_group: '', email: 'admin@bcnbangkok.ac.th', password: 'admin123' },
-    { user_id: 'ST-4567-a1b2c3', cid: '1100701234567', name: 'กานต์ พยาบาลดี', role: 'student', class_group: 'พย.2/1', student_code: '6412001', email: '', password: '' },
-    { user_id: 'ST-5678-d4e5f6', cid: '1100702345678', name: 'นภา ศรีสุข', role: 'student', class_group: 'พย.2/1', student_code: '6412018', email: '', password: '' },
-    { user_id: 'ST-6789-g7h8i9', cid: '1100703456789', name: 'ธีรเดช มั่นคง', role: 'student', class_group: 'พย.2/2', student_code: '6412102', email: '', password: '' },
-    { user_id: 'ST-7890-j1k2l3', cid: '1100704567890', name: 'พิมพ์ชนก ใจงาม', role: 'student', class_group: 'พย.2/2', student_code: '6412147', email: '', password: '' },
+    { user_id: 'ST-4567-a1b2c3', cid: '1100701234567', name: 'กานต์ พยาบาลดี', role: 'student', class_group: 'ปี 2 Sec A', year_level: 2, section: 'A', student_code: '6412001', email: '', password: '' },
+    { user_id: 'ST-5678-d4e5f6', cid: '1100702345678', name: 'นภา ศรีสุข', role: 'student', class_group: 'ปี 2 Sec A', year_level: 2, section: 'A', student_code: '6412018', email: '', password: '' },
+    { user_id: 'ST-6789-g7h8i9', cid: '1100703456789', name: 'ธีรเดช มั่นคง', role: 'student', class_group: 'ปี 2 Sec B', year_level: 2, section: 'B', student_code: '6412102', email: '', password: '' },
+    { user_id: 'ST-7890-j1k2l3', cid: '1100704567890', name: 'พิมพ์ชนก ใจงาม', role: 'student', class_group: 'ปี 2 Sec B', year_level: 2, section: 'B', student_code: '6412147', email: '', password: '' },
   ];
 
   let settings = {
@@ -2114,6 +2523,39 @@ const MockAPI = (function () {
         if (!b) return { error: 'ไม่พบการจองนี้' };
         if (p.role !== 'teacher' && p.role !== 'admin' && b.user_id !== String(p.user_id)) return { error: 'ยกเลิกได้เฉพาะของตัวเอง' };
         b.status = 'cancelled'; return { ok: true };
+      }
+      case 'adminUsers': {
+        const norm = (x) => {
+          const role = x.role || 'student';
+          const y = parseInt(String(x.year_level || '').replace(/\D/g, ''), 10) || null;
+          const sec = String(x.section || '').toUpperCase();
+          return { name: String(x.name || '').trim(), email: String(x.email || '').trim().toLowerCase(), role,
+                   student_code: role === 'student' ? String(x.student_code || '') : '',
+                   year_level: role === 'student' ? y : null, section: role === 'student' ? sec : '',
+                   class_group: role === 'student' ? (x.class_group || (y ? 'ปี ' + y + (sec ? ' Sec ' + sec : '') : '')) : '' };
+        };
+        const full = u => Object.assign(strip(u, 'admin'), { bookings: bookings.filter(b => b.user_id === u.user_id).length });
+        if (p.op === 'list') return { users: users.map(full) };
+        if (p.op === 'save') {
+          const v = norm(p); if (!v.name) return { error: 'กรุณากรอกชื่อ-สกุล' };
+          if (v.email && users.some(u => u.email === v.email && u.user_id !== p.user_id)) return { error: 'อีเมล ' + v.email + ' มีผู้ใช้อื่นใช้อยู่แล้ว' };
+          let u = p.user_id ? users.find(x => x.user_id === p.user_id) : null;
+          if (!u) { u = { user_id: (v.role === 'student' ? 'ST-' : v.role === 'teacher' ? 'T-' : 'A-') + Math.random().toString(16).slice(2, 10).toUpperCase() }; users.push(u); }
+          Object.assign(u, v, { active: p.active !== false });
+          return { ok: true, user: full(u) };
+        }
+        if (p.op === 'delete') { const i = users.findIndex(x => x.user_id === p.user_id); if (i < 0) return { error: 'ไม่พบผู้ใช้นี้' }; users.splice(i, 1); return { ok: true }; }
+        if (p.op === 'import') {
+          let created = 0, updated = 0; const errors = [];
+          (p.rows || []).forEach((x, i) => {
+            const v = norm(x); if (!v.name) return errors.push({ row: i + 1, name: '', error: 'กรุณากรอกชื่อ-สกุล' });
+            const u = v.email && users.find(y => y.email === v.email);
+            if (u) { Object.assign(u, v); updated++; }
+            else { users.push(Object.assign({ user_id: 'ST-' + Math.random().toString(16).slice(2, 10).toUpperCase(), active: true }, v)); created++; }
+          });
+          return { ok: true, created, updated, errors };
+        }
+        return { error: 'ไม่รู้จักคำสั่ง' };
       }
       case 'updateBooking': {
         const b = bookings.find(x => x.booking_id === p.booking_id);

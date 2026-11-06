@@ -88,6 +88,12 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ 
 /* ---------- role helpers ---------- */
 function isAdmin() { return State.user && State.user.role === 'admin'; }
 function isStaff() { return State.user && (State.user.role === 'teacher' || State.user.role === 'admin'); }
+/* จำนวนบัญชี BI ที่ขอ แยก อาจารย์ / นักศึกษา (การจองเก่าที่ยังไม่แยก แสดงเป็นยอดรวม) */
+function biReqText(b) {
+  const t = +b.bi_count_teacher || 0, s = +b.bi_count_student || 0;
+  if (t || s) return [t ? 'อาจารย์ ' + t : '', s ? 'นักศึกษา ' + s : ''].filter(Boolean).join(' · ');
+  return +b.bi_count ? String(b.bi_count) : '';
+}
 
 /* =========================================================
    API LAYER
@@ -647,8 +653,13 @@ Views._slotsRender = function (dateISO, d) {
           <input class="input" id="bkSize" type="number" min="1" max="300" value="1" />
         </div>
         <div class="field">
-          <label for="bkBiCount">จำนวนบัญชี BI ที่ต้องการใช้</label>
-          <input class="input" id="bkBiCount" type="number" min="0" max="20" value="1" />
+          <label>จำนวนบัญชี BI ที่ต้องการใช้</label>
+          <div class="bi-split">
+            <label class="bi-split-item" for="bkBiT"><span>${svg(I.user)}User อาจารย์</span>
+              <input class="input" id="bkBiT" type="number" min="0" max="50" value="${State.user.role === 'student' ? 0 : 1}" /></label>
+            <label class="bi-split-item" for="bkBiS"><span>${svg(I.cap)}User นักศึกษา</span>
+              <input class="input" id="bkBiS" type="number" min="0" max="50" value="${State.user.role === 'student' ? 1 : 0}" /></label>
+          </div>
           <div class="help">ผู้ดูแลระบบจะเป็นผู้เลือกและจ่ายบัญชีให้เมื่ออนุมัติการจอง</div>
         </div>
       </div>
@@ -697,7 +708,8 @@ Views._slotsRender = function (dateISO, d) {
     Views._cases = (dr.cases || []).slice();
     const tEl = $('bkTeacher'); if (tEl) tEl.value = dr.teacher || '';
     const nEl = $('bkNote');    if (nEl) nEl.value = dr.note || '';
-    const cEl = $('bkBiCount'); if (cEl) cEl.value = dr.bi_count;
+    const tB = $('bkBiT'); if (tB) tB.value = dr.bi_t;
+    const sB = $('bkBiS'); if (sB) sB.value = dr.bi_s;
   }
 
   Views.renderCaseChips();
@@ -937,7 +949,9 @@ Views.submitBooking = async function (again) {
     note: $('bkNote').value.trim(),
     group_size: parseInt($('bkSize').value, 10) || 1,
     group_members: Views._members.map(m => m.name).join(', '),
-    bi_count: parseInt($('bkBiCount') && $('bkBiCount').value, 10) || 0
+    bi_count_teacher: Math.max(0, parseInt($('bkBiT') && $('bkBiT').value, 10) || 0),
+    bi_count_student: Math.max(0, parseInt($('bkBiS') && $('bkBiS').value, 10) || 0),
+    bi_count: Math.max(0, parseInt($('bkBiT') && $('bkBiT').value, 10) || 0) + Math.max(0, parseInt($('bkBiS') && $('bkBiS').value, 10) || 0)
   });
   setLoading(btn, false, again ? 'บันทึก แล้วจองกลุ่มถัดไปในช่วงเวลาเดิม' : 'ยืนยันการจอง');
   if (r.error) return toast(r.error, 'err');
@@ -950,7 +964,8 @@ Views.submitBooking = async function (again) {
       cases: (Views._cases || []).slice(),
       teacher: $('bkTeacher').value,
       note: $('bkNote').value.trim(),
-      bi_count: ($('bkBiCount') && $('bkBiCount').value) || '1'
+      bi_t: ($('bkBiT') && $('bkBiT').value) || '0',
+      bi_s: ($('bkBiS') && $('bkBiS').value) || '0'
     };
     toast('บันทึกกลุ่มนี้แล้ว · เลือกสมาชิกกลุ่มถัดไปได้เลย', 'ok');
     Views.loadSlots(State.bookDate);
@@ -1179,7 +1194,8 @@ App.approve = async function (id) {
   const group = (type, label) => {
     const items = avail.filter(a => a.account_type === type);
     if (!items.length) return '';
-    return `<div class="asn-group"><div class="asn-head">${label}</div>
+    const want = b ? (+(type === 'teacher' ? b.bi_count_teacher : b.bi_count_student) || 0) : 0;
+    return `<div class="asn-group"><div class="asn-head">${label}${want ? ` <span class="asn-want">· ขอ ${want} บัญชี</span>` : ''}</div>
       ${items.map(a => `
         <label class="asn-item">
           <input type="checkbox" class="asnck" value="${esc(a.account_id)}" />
@@ -1190,7 +1206,7 @@ App.approve = async function (id) {
   const info = b ? `<div class="asn-bk">
       <b>${esc(b.name)}</b> · ${fmtThaiShort(b.date)} · ${esc(b.start_time)}–${esc(b.end_time)}
       ${b.group_size > 1 ? `<span class="badge in">${b.group_size} คน</span>` : ''}
-      ${b.bi_count ? `<span class="badge pending">ขอบัญชี BI ${esc(String(b.bi_count))} บัญชี</span>` : ''}
+      ${biReqText(b) ? `<span class="badge pending">ขอบัญชี BI: ${esc(biReqText(b))}</span>` : ''}
       ${b.group_members ? `<div class="help">กลุ่ม: ${esc(b.group_members)}</div>` : ''}
     </div>` : '';
   openModal(`
@@ -1298,8 +1314,11 @@ App.editBooking = async function (id) {
           <select class="input" id="edSup">${supOpts}</select></div>
         <div class="field"><label for="edSize">จำนวนผู้ฝึก (คน)</label>
           <input class="input" type="number" min="1" id="edSize" value="${esc(String(b.group_size || 1))}" /></div>
-        <div class="field"><label for="edBiCount">จำนวนบัญชี BI ที่ขอ</label>
-          <input class="input" type="number" min="0" id="edBiCount" value="${esc(String(b.bi_count || 0))}" /></div>
+        <div class="field"><label for="edBiT">บัญชี BI ที่ขอ · User อาจารย์</label>
+          <input class="input" type="number" min="0" id="edBiT" value="${esc(String(b.bi_count_teacher || 0))}" /></div>
+        <div class="field"><label for="edBiS">บัญชี BI ที่ขอ · User นักศึกษา</label>
+          <input class="input" type="number" min="0" id="edBiS" value="${esc(String(b.bi_count_student || 0))}" />
+          ${!(+b.bi_count_teacher || +b.bi_count_student) && +b.bi_count ? `<div class="help">การจองเดิมขอรวม ${esc(String(b.bi_count))} บัญชี (ยังไม่แยกประเภท)</div>` : ''}</div>
         <div class="field ed-full"><label for="edMembers">รายชื่อสมาชิกกลุ่ม</label>
           <input class="input" id="edMembers" value="${esc(b.group_members)}" placeholder="คั่นด้วย , " /></div>
         <div class="field ed-full"><label for="edBi">บัญชี BI ที่จ่ายให้</label>
@@ -1329,7 +1348,8 @@ App.saveBookingEdit = async function (id) {
     supervisor: $('edSup').value,
     group_size: $('edSize').value,
     group_members: $('edMembers').value.trim(),
-    bi_count: $('edBiCount').value,
+    bi_count_teacher: $('edBiT').value,
+    bi_count_student: $('edBiS').value,
     bi_account: $('edBi').value.trim(),
     checked_in: $('edChecked').checked ? 'yes' : 'no',
     note: $('edNote').value.trim()
@@ -2244,7 +2264,7 @@ function teacherBookingCard(b) {
           ${b.subject_case ? `<span>เคส: <b>${esc(b.subject_case)}</b></span>` : ''}
           ${b.supervisor ? `<span>อาจารย์: <b>${esc(b.supervisor)}</b></span>` : ''}
           ${b.group_size > 1 ? `<span>ผู้เข้าฝึก: <b>${esc(String(b.group_size))} คน</b></span>` : ''}
-          ${b.bi_count ? `<span>ขอบัญชี BI: <b>${esc(String(b.bi_count))}</b></span>` : ''}
+          ${biReqText(b) ? `<span>ขอบัญชี BI: <b>${esc(biReqText(b))}</b></span>` : ''}
           ${b.bi_account ? `<span class="${isAdmin() ? '' : 'secure'}">บัญชี BI: <b>${esc(b.bi_account)}</b></span>` : ''}
         </div>
       </div>
@@ -2282,7 +2302,7 @@ function rowBooking(b) {
     <td>${esc(b.name)}<div style="font-size:.78rem;color:var(--muted)">${esc(b.user_id)}</div></td>
     <td>${esc(b.subject_case || '—')}</td>
     <td>${esc(b.supervisor || '—')}</td>
-    <td>${b.bi_account ? `<span class="${isAdmin() ? '' : 'secure'}">${esc(b.bi_account)}</span>` : (b.bi_count ? `<span style="color:var(--muted)">ขอ ${esc(String(b.bi_count))}</span>` : '<span style="color:var(--muted)">—</span>')}</td>
+    <td>${b.bi_account ? `<span class="${isAdmin() ? '' : 'secure'}">${esc(b.bi_account)}</span>` : (biReqText(b) ? `<span style="color:var(--muted)">ขอ ${esc(biReqText(b))}</span>` : '<span style="color:var(--muted)">—</span>')}</td>
     <td>${statusBadge(b.status)}</td>
     <td>${b.checked_in === 'yes' ? '<span class="badge in">มาแล้ว</span>' : '<span style="color:var(--muted)">—</span>'}</td>
     <td><div class="row-actions">${act}</div></td>
@@ -2588,6 +2608,8 @@ const MockAPI = (function () {
           date, start_time: start, end_time: end, station_no: station, subject_case: p.subject_case || '',
           supervisor: p.supervisor || '',
           group_size: parseInt(p.group_size, 10) || 1, group_members: p.group_members || '', bi_account: '',
+          bi_count_teacher: parseInt(p.bi_count_teacher, 10) || 0, bi_count_student: parseInt(p.bi_count_student, 10) || 0,
+          bi_count: (parseInt(p.bi_count_teacher, 10) || 0) + (parseInt(p.bi_count_student, 10) || 0),
           status: 'pending', checked_in: 'no', created_at: new Date().toISOString(), note: String(p.note || '')
         };
         bookings.push(rec);
@@ -2640,7 +2662,9 @@ const MockAPI = (function () {
           .forEach(k => { if (p[k] !== undefined) b[k] = p[k]; });
         b.station_no = parseInt(p.station_no, 10) || b.station_no || 1;
         b.group_size = parseInt(p.group_size, 10) || 1;
-        b.bi_count = parseInt(p.bi_count, 10) || 0;
+        b.bi_count_teacher = parseInt(p.bi_count_teacher, 10) || 0;
+        b.bi_count_student = parseInt(p.bi_count_student, 10) || 0;
+        b.bi_count = b.bi_count_teacher + b.bi_count_student;
         return { ok: true, booking: JSON.parse(JSON.stringify(b)) };
       }
       case 'deleteBooking': {

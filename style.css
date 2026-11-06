@@ -860,3 +860,10 @@ body.app-blurred .secure {
 .imp-file { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .imp-file .btn svg { width: 15px; height: 15px; }
 .imp-pick { cursor: pointer; }
+
+/* ===== จำนวนบัญชี BI แยก อาจารย์ / นักศึกษา ===== */
+.bi-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.bi-split-item { display: flex; flex-direction: column; gap: 5px; margin: 0 !important; font-weight: 400 !important; }
+.bi-split-item > span { display: inline-flex; align-items: center; gap: 5px; font-size: .8rem; color: var(--muted); }
+.bi-split-item > span svg { width: 14px; height: 14px; }
+.asn-want { color: var(--warn); text-transform: none; letter-spacing: 0; }

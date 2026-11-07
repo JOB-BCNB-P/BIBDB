@@ -690,8 +690,7 @@ Views._slotsRender = function (dateISO, d) {
         <div id="bkChips" class="picked-box"></div>
       </div>
       <button class="btn btn-primary btn-block" onclick="Views.submitBooking(false)">${svg(I.check)}ยืนยันการจอง</button>
-      ${isStaff() ? `<button class="btn btn-soft btn-block" style="margin-top:8px" onclick="Views.submitBooking(true)">${svg(I.plus)}บันทึก แล้วจองกลุ่มถัดไปในช่วงเวลาเดิม</button>
-      <div class="help" style="text-align:center">อาจารย์จองหลายกลุ่มในช่วงเวลาเดียวกันได้ ตราบที่ยังมีเครื่อง (User) ว่าง — ระบบจัดเครื่องให้แต่ละกลุ่มอัตโนมัติ</div>` : ''}
+      ${isStaff() ? `<button class="btn btn-soft btn-block" style="margin-top:8px" onclick="Views.submitBooking(true)">${svg(I.plus)}บันทึก แล้วจองกลุ่มถัดไปในช่วงเวลาเดิม</button>` : ''}
     </div>` : emptyState('😔', 'ไม่มีช่วงเวลาว่างในวันนี้', 'กรุณาเลือกวันอื่น')}
   `;
   if (startOpts) Views.updateEnd();
@@ -2599,8 +2598,7 @@ const MockAPI = (function () {
         if (eM - sM > settings.max_duration * 60) return { error: 'จองได้ไม่เกิน ' + settings.max_duration + ' ชั่วโมงต่อครั้ง' };
         const day = activeOf(date);
         const dup = day.find(b => b.user_id === String(p.user_id) && overlaps(sM, eM, t2m(b.start_time), t2m(b.end_time)));
-        // อาจารย์/ผู้ดูแลจองหลายกลุ่มในช่วงเดิมได้ (ตรงกับ 07_staff_multi_booking.sql)
-        if (dup && p.role !== 'teacher' && p.role !== 'admin') return { error: 'คุณมีการจองที่คาบเกี่ยวช่วงเวลานี้อยู่แล้ว' };
+        if (dup) return { error: 'คุณมีการจองที่คาบเกี่ยวช่วงเวลานี้อยู่แล้ว' };
         const ov = day.filter(b => overlaps(sM, eM, t2m(b.start_time), t2m(b.end_time)));
         if (ov.length >= settings.total_stations) return { error: 'ช่วงเวลานี้เต็มแล้ว กรุณาเลือกช่วงอื่น' };
         const usedNos = ov.map(b => b.station_no);

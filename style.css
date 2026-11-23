@@ -1305,3 +1305,8 @@ body.app-blurred .secure {
 .set-tabs button.active { background: var(--mint-soft); border-color: var(--mint-deep); color: var(--mint-deep); }
 .set-tabs button:focus-visible { outline: 2px solid var(--sky-deep); outline-offset: 2px; }
 @media (max-width: 560px) { .set-tabs { grid-template-columns: repeat(2, 1fr); } }
+
+/* ===== กล่องแจ้ง: จองได้เฉพาะอาจารย์ ===== */
+.notice-box { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; margin-bottom: 14px;
+  border-radius: var(--radius-sm); background: var(--sky-soft); color: var(--sky-deep); font-size: .9rem; line-height: 1.55; }
+.notice-box svg { width: 18px; height: 18px; flex: none; margin-top: 2px; }

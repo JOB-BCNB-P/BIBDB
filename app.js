@@ -457,7 +457,6 @@ const App = {
     } else {
       items = [
         ['sdash', I.dash, 'หน้าหลัก'],
-        ['sbook', I.plus, 'จองคิว'],
         ['scal', I.cal, 'ปฏิทิน'],
         ['smine', I.book, 'การจองของฉัน'],
         ['tbi', I.key, 'บัญชี BI'],
@@ -472,6 +471,11 @@ const App = {
     // ---- Route guard: หน้าสำหรับอาจารย์/ผู้ดูแลเท่านั้น (นักศึกษาเข้าไม่ได้) ----
     const STAFF_ONLY = ['tscenarios', 'tdash', 'tbookings', 'tcal', 'treport', 'tsettings'];
     if (STAFF_ONLY.indexOf(view) >= 0 && !isStaff()) {
+      view = 'sdash';
+    }
+    // ---- หน้าจองคิว: เปิดเฉพาะอาจารย์/ผู้ดูแล (ตรงกับ 08_teacher_only_booking.sql) ----
+    if (view === 'sbook' && !isStaff()) {
+      toast('การจองเปิดให้เฉพาะอาจารย์ — นักศึกษาโปรดติดต่ออาจารย์ผู้สอนเพื่อจองให้', 'err');
       view = 'sdash';
     }
     State._navToken = (State._navToken || 0) + 1; // กันข้อมูลหน้าเก่ามาวาดทับ
@@ -519,14 +523,15 @@ Views._sdashRender = function (m, d) {
 
       <div class="card">
         <div class="section-head"><h3>คิวของฉันที่กำลังจะถึง</h3><span class="topbar-spacer"></span>
-          <button class="btn btn-primary btn-sm" onclick="App.go('sbook')">${svg(I.plus)}จองเพิ่ม</button></div>
-        ${upcoming.length ? upcoming.slice(0, 4).map(b => bookingCard(b)).join('') : emptyState('🗓️', 'ยังไม่มีคิวที่จองไว้', 'กดปุ่ม “จองเพิ่ม” เพื่อเริ่มจองรอบใช้งาน')}
+          ${isStaff() ? `<button class="btn btn-primary btn-sm" onclick="App.go('sbook')">${svg(I.plus)}จองเพิ่ม</button>` : ''}</div>
+        ${isStaff() ? '' : `<div class="notice-box">${svg(I.info)}<span>การจองใช้งาน Body Interact <b>เปิดให้เฉพาะอาจารย์</b> — นักศึกษาโปรดติดต่ออาจารย์ผู้สอนเพื่อจองให้ ดูตารางว่างได้ที่เมนู “ปฏิทิน”</span></div>`}
+        ${upcoming.length ? upcoming.slice(0, 4).map(b => bookingCard(b)).join('') : emptyState('🗓️', 'ยังไม่มีคิวที่จองไว้', isStaff() ? 'กดปุ่ม “จองเพิ่ม” เพื่อเริ่มจองรอบใช้งาน' : 'เมื่ออาจารย์จองให้แล้ว รายการจะแสดงที่นี่')}
       </div>
     </div>`;
 };
 
 
-/* ---------- จองคิว (ทุกบทบาท: นักศึกษา / อาจารย์ / ผู้ดูแล) ----------
+/* ---------- จองคิว (อาจารย์ / ผู้ดูแลเท่านั้น — นักศึกษาจองเองไม่ได้) ----------
    เวลาแบบยืดหยุ่น: เลือกเวลาเริ่ม–สิ้นสุดเองเป็นช่วงละ 30 นาที */
 Views.sbook = async function (m) {
   Views._draft = null;                 // เข้าหน้าจองใหม่ → ไม่สืบทอดค่าค้างจากรอบก่อน
@@ -991,7 +996,7 @@ Views._smineRender = function (m, d) {
     <div class="view">
       <div class="section-head"><h2>การจองของฉัน</h2><span class="hint">ทั้งหมด ${list.length} รายการ</span></div>
       <div class="card">
-        ${list.length ? pg.slice.map(b => bookingCard(b, true)).join('') : emptyState('📋', 'ยังไม่มีประวัติการจอง', 'ไปที่หน้า “จองคิว” เพื่อเริ่มจอง')}
+        ${list.length ? pg.slice.map(b => bookingCard(b, true)).join('') : emptyState('📋', 'ยังไม่มีประวัติการจอง', isStaff() ? 'ไปที่หน้า “จองคิว” เพื่อเริ่มจอง' : 'การจองเปิดให้เฉพาะอาจารย์ — โปรดติดต่ออาจารย์ผู้สอน')}
         ${pg.html}
       </div>
     </div>`;
@@ -1106,9 +1111,9 @@ App.dayDetail = function (iso) {
     <div class="dd">
       <div class="dd-date">${svg(I.cal)} การจองวันที่ ${fmtThaiDate(iso)}</div>
       <div class="dd-list">${rows}</div>
-      <div class="modal-actions" style="margin-top:12px">
+      ${isStaff() ? `<div class="modal-actions" style="margin-top:12px">
         <button class="btn btn-primary btn-block" onclick="App._closeModal();State.bookDate='${iso}';App.go('sbook')">${svg(I.plus)}จองวันนี้</button>
-      </div>
+      </div>` : ''}
     </div>`);
 };
 
@@ -2589,6 +2594,7 @@ const MockAPI = (function () {
         };
       }
       case 'createBooking': {
+        if (p.role !== 'teacher' && p.role !== 'admin') return { error: 'การจองเปิดให้เฉพาะอาจารย์ — นักศึกษาโปรดติดต่ออาจารย์ผู้สอนเพื่อจองให้' };
         const date = p.date, start = p.start_time, end = p.end_time;
         if (!date || !start || !end) return { error: 'กรุณาเลือกวันและช่วงเวลา' };
         const sM = t2m(start), eM = t2m(end);

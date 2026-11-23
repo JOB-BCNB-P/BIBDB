@@ -600,7 +600,7 @@ Views._slotsRender = function (dateISO, d) {
   Views._cases = [];
   // คลังนักศึกษาสำหรับเลือกตามชั้นปี (ไม่รวมตัวเอง)
   Views._stuPool = (Views._userCache || []).filter(u =>
-    u.role === 'student' && u.active !== false && String(u.user_id) !== String(State.user.user_id));
+    u.role === 'student' && String(u.user_id) !== String(State.user.user_id));   // รวมนักศึกษาที่ถูกระงับการเข้าระบบ — อาจารย์ยังเลือกเข้ากลุ่มได้
   const years = Array.from(new Set(Views._stuPool.map(u => Views.yearOfU(u))))
                      .filter(Boolean).sort();
   const yearOpts = years.map(y => `<option value="${esc(y)}">ชั้นปีที่ ${esc(y)}</option>`).join('');
